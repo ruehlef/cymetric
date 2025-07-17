@@ -4,7 +4,7 @@ BeginPackage["cymetric`"]
 
 
 (*
-This package provides a Mathematica interface for the Python cymetric paper. Authors Fabian Ruehle and Robin Schneider. For more information visit https://github.com/pythoncymetric/cymetric 
+This package provides a Mathematica interface for the Python cymetric paper. Author Fabian Ruehle. For more information visit https://github.com/ruehlef/cymetric 
 *)
 GlobalOptions::usage = 
 "Global Options for the package. These are default values that hopefully work for you and need not be changed too often. You can see all with GetGlobalOptions[], and change them easily with ChangeSetting[<option>, <value>]
@@ -603,7 +603,7 @@ SetupPythonVENV[exec_String, OptionsPattern[]] :=
         ];
       ];
       Print["Installing cymetric..."];
-      installPackages = RunProcess[{pip, "install", "git+https://github.com/pythoncymetric/cymetric.git"}];
+      installPackages = RunProcess[{pip, "install", "git+https://github.com/ruehlef/cymetric.git"}];
       If[installPackages["ExitCode"] != 0,
         Print["An error occurred. Here's the output"];
         Print[installPackages["StandardOutput"]];
