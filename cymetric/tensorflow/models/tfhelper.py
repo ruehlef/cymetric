@@ -4,19 +4,28 @@ A collection of various helper functions.
 import tensorflow as tf
 
 
-def prepare_tf_basis(basis, dtype=tf.complex64):
+def prepare_basis(basis, dtype=tf.complex64):
     r"""Casts each entry in Basis to dtype.
 
     Args:
-        basis (dict): dictionary containing geometric information
-        dtype (_type_, optional): type to cast to. Defaults to tf.complex64.
+        basis (dict or str): dictionary containing geometric information or path to pickle file
+        dtype (tf.dtype, optional): type to cast to. Defaults to tf.complex64.
 
     Returns:
         dict: with tensors rather than ndarrays
     """
+    # Load from file if string path is provided
+    if isinstance(basis, str):
+        import pickle
+        with open(basis, 'rb') as f:
+            basis = pickle.load(f)
+    
     new_basis = {}
     for key in basis:
-        new_basis[key] = tf.cast(basis[key], dtype=dtype)
+        if isinstance(basis[key], np.ndarray):
+            new_basis[key] = tf.cast(basis[key], dtype)
+        else:
+            new_basis[key] = basis[key]
     return new_basis
 
 

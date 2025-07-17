@@ -25,7 +25,7 @@ def _import_torch_components():
     """Import PyTorch-specific components."""
     try:
         from ..torch.models.torchmodels import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..torch.models.torchhelper import prepare_torch_basis, train_model
+        from ..torch.models.torchhelper import prepare_basis, train_model
         from ..torch.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
         return {
             'models': {
@@ -38,7 +38,7 @@ def _import_torch_components():
                 'MatrixFSModelToric': MatrixFSModelToric
             },
             'helpers': {
-                'prepare_basis': prepare_torch_basis,
+                'prepare_basis': prepare_basis,
                 'train_model': train_model
             },
             'callbacks': {
@@ -61,7 +61,7 @@ def _import_tensorflow_components():
         tf.get_logger().setLevel('ERROR')
         
         from ..tensorflow.models.tfmodels import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..tensorflow.models.tfhelper import prepare_tf_basis, train_model
+        from ..tensorflow.models.tfhelper import prepare_basis, train_model
         from ..tensorflow.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
         return {
             'tf': tf,
@@ -76,7 +76,7 @@ def _import_tensorflow_components():
                 'MatrixFSModelToric': MatrixFSModelToric
             },
             'helpers': {
-                'prepare_basis': prepare_tf_basis,
+                'prepare_basis': prepare_basis,
                 'train_model': train_model
             },
             'callbacks': {
@@ -226,7 +226,7 @@ def train_NN(my_args):
     
     # get info of generated points
     data = np.load(os.path.join(args['Dir'], 'dataset.npz'))
-    BASIS = prepare_tf_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
+    BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
     kappa = BASIS['KAPPA'].numpy()
 
     # load toric data if exists/needed
@@ -360,7 +360,7 @@ def get_g(my_args):
         else:
             mcy_logger.error("Model set to {}, but {} with toric data not found.".format(args['Model'], args['toric_data_path']))
         
-    BASIS = prepare_tf_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
+    BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
     kappa = BASIS['KAPPA'].numpy()
     pts = tf.convert_to_tensor(pts, dtype=tf.float32)
     model = tfk.models.load_model(os.path.join(args['Dir'], 'model'))
@@ -427,7 +427,7 @@ def get_kahler_potential(my_args):
         else:
             mcy_logger.error("Model set to {}, but {} with toric data not found.".format(args['Model'], args['toric_data_path']))
         
-    BASIS = prepare_tf_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
+    BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
     pts = tf.convert_to_tensor(pts, dtype=tf.float32)
     model = tfk.models.load_model(os.path.join(args['Dir'], 'model'))
     if args['Model'] == 'PhiFS':

@@ -4,9 +4,9 @@ PyTorch implementation of Cymetric
 This module provides PyTorch-based models for Calabi-Yau metric learning.
 
 Usage:
-    from cymetric_unified.torch.models import MultFSModel, PhiFSModel
-    from cymetric_unified.torch.models.torchhelper import prepare_torch_basis, train_model
-    from cymetric_unified.torch.models.callbacks import SigmaCallback, KaehlerCallback
+    from cymetric.torch.models import MultFSModel, PhiFSModel
+    from cymetric.torch.models.torchhelper import prepare_basis, train_model
+    from cymetric.torch.models.callbacks import SigmaCallback, KaehlerCallback
 
 :Authors:
     Fabian Ruehle f.ruehle@northeastern.edu
@@ -18,7 +18,7 @@ try:
     import torch.nn as nn
 except ImportError:
     raise ImportError(
-        "PyTorch is not installed. Install with: pip install cymetric_unified[torch]"
+        "PyTorch is not installed. Install with: pip install cymetric[torch]"
     )
 
 # Import all model classes
@@ -34,8 +34,9 @@ from .models.torchmodels import (
 
 # Import helper functions
 from .models.torchhelper import (
-    prepare_torch_basis,
-    train_model
+    prepare_basis,
+    train_model,
+    EarlyStopping
 )
 
 # Import callbacks
@@ -68,7 +69,7 @@ __all__ = [
     'PhiFSModelToric',
     'MatrixFSModelToric',
     # Helpers
-    'prepare_torch_basis',
+    'prepare_basis',
     'train_model',
     # Callbacks
     'SigmaCallback',

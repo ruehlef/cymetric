@@ -8,7 +8,7 @@ import copy
 import tqdm
 
 
-def prepare_torch_basis(basis, dtype=torch.complex64):
+def prepare_basis(basis, dtype=torch.complex64):
     r"""Casts each entry in Basis to dtype.
 
     Args:

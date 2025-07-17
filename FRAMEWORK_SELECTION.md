@@ -4,7 +4,7 @@ This document describes how to control which framework (PyTorch or TensorFlow) i
 
 ## Default Behavior
 
-When both PyTorch and TensorFlow are installed, cymetric defaults to the faster **TensorFlow**:
+When both PyTorch and TensorFlow are installed, cymetric defaults to **TensorFlow**:
 
 ```python
 import cymetric
@@ -79,3 +79,17 @@ The following modules support automatic framework selection:
 - `cymetric.models.torchhelper` / `cymetric.models.tfhelper`
 
 All of these automatically redirect to the appropriate framework implementation.
+
+## Function Name Compatibility
+
+The helper modules provide unified function names across frameworks:
+
+```python
+# These all work regardless of the selected framework
+from cymetric.models.torchhelper import prepare_torch_basis  # Works with both frameworks
+from cymetric.models.tfhelper import prepare_tf_basis        # Works with both frameworks
+from cymetric.models.torchhelper import prepare_tf_basis     # Cross-compatible alias
+from cymetric.models.tfhelper import prepare_torch_basis     # Cross-compatible alias
+```
+
+This ensures that existing code using framework-specific function names continues to work regardless of which framework is selected.

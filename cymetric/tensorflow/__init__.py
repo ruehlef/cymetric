@@ -4,9 +4,9 @@ TensorFlow implementation of Cymetric
 This module provides TensorFlow-based models for Calabi-Yau metric learning.
 
 Usage:
-    from cymetric_unified.tensorflow.models import MultFSModel, PhiFSModel
-    from cymetric_unified.tensorflow.models.tfhelper import prepare_tf_basis, train_model
-    from cymetric_unified.tensorflow.models.callbacks import SigmaCallback, KaehlerCallback
+    from cymetric.tensorflow.models import MultFSModel, PhiFSModel
+    from cymetric.tensorflow.models.tfhelper import prepare_basis, train_model
+    from cymetric.tensorflow.models.callbacks import SigmaCallback, KaehlerCallback
 
 :Authors:
     Fabian Ruehle f.ruehle@northeastern.edu
@@ -20,7 +20,7 @@ try:
     tf.get_logger().setLevel('ERROR')
 except ImportError:
     raise ImportError(
-        "TensorFlow is not installed. Install with: pip install cymetric_unified[tensorflow]"
+        "TensorFlow is not installed. Install with: pip install cymetric[tensorflow]"
     )
 
 # Import all model classes
@@ -36,7 +36,7 @@ from .models.tfmodels import (
 
 # Import helper functions
 from .models.tfhelper import (
-    prepare_tf_basis,
+    prepare_basis,
     train_model
 )
 
@@ -78,7 +78,7 @@ __all__ = [
     'PhiFSModelToric',
     'MatrixFSModelToric',
     # Helpers
-    'prepare_tf_basis',
+    'prepare_basis',
     'train_model',
     # Callbacks
     'SigmaCallback',
