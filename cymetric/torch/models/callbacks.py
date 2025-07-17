@@ -3,7 +3,7 @@ A collection of PyTorch callbacks.
 """
 import torch
 import numpy as np
-from cymetric.models.measures import ricci_measure, sigma_measure, \
+from .measures import ricci_measure, sigma_measure, \
     kaehler_measure_loss, transition_measure_loss, ricci_scalar_fn
 
 

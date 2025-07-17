@@ -3,9 +3,9 @@ A selection of custom tensorflow models for learning
 Calabi-Yau metrics using neural networks.
 """
 import tensorflow as tf
-from cymetric_tf.models.losses import sigma_loss
-from cymetric_tf.models.fubinistudy import FSModel
-from cymetric_tf.pointgen.nphelper import get_all_patch_degrees, compute_all_w_of_x, get_levicivita_tensor
+from .losses import sigma_loss
+from .fubinistudy import FSModel
+from cymetric.pointgen.nphelper import get_all_patch_degrees, compute_all_w_of_x, get_levicivita_tensor
 import numpy as np
 tfk = tf.keras
 

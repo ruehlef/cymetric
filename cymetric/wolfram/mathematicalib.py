@@ -99,7 +99,12 @@ def get_torch_components():
 def get_tensorflow_components():
     """Get TensorFlow components for Mathematica interface."""
     return _import_tensorflow_components()
-from cymetric.models.metrics import SigmaLoss, KaehlerLoss, TransitionLoss, RicciLoss, VolkLoss
+
+try:
+    from cymetric.models.metrics import SigmaLoss, KaehlerLoss, TransitionLoss, RicciLoss, VolkLoss
+except ImportError:
+    # If models not available, define dummy classes
+    SigmaLoss = KaehlerLoss = TransitionLoss = RicciLoss = VolkLoss = None
 
 from wolframclient.language import wl
 from wolframclient.serializers import export as wlexport

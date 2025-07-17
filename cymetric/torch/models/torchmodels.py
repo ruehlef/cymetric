@@ -4,8 +4,8 @@ Calabi-Yau metrics using neural networks.
 """
 import torch
 import torch.nn as nn
-from cymetric.models.losses import sigma_loss
-from cymetric.models.fubinistudy import FSModel
+from .losses import sigma_loss
+from .fubinistudy import FSModel
 from cymetric.pointgen.nphelper import get_all_patch_degrees, compute_all_w_of_x, get_levicivita_tensor
 import numpy as np
 
