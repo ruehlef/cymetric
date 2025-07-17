@@ -2,6 +2,7 @@
 A collection of various helper functions.
 """
 import tensorflow as tf
+import numpy as np
 
 
 def prepare_basis(basis, dtype=tf.complex64):
