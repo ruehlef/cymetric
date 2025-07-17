@@ -72,7 +72,9 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
     if optimizer is None:
         optimizer = tf.keras.optimizers.Adam()
     # Compile once at start of training to avoid resetting optimizer
-    fsmodel.compile(custom_metrics=custom_metrics, optimizer=optimizer)
+    # Handle empty custom_metrics list
+    compile_metrics = custom_metrics if custom_metrics else None
+    fsmodel.compile(custom_metrics=compile_metrics, optimizer=optimizer)
     for epoch in range(epochs):
         batch_size = batch_sizes[0]
         fsmodel.learn_kaehler = learn_kaehler

@@ -183,7 +183,7 @@ class FreeModel(FSModel):
             metrics.extend(layer._metrics)
         return metrics
 
-    def train_step(self, data):
+def train_step(self, data):
         r"""Train step of a single batch in model.fit().
 
         NOTE:
@@ -256,7 +256,8 @@ class FreeModel(FSModel):
         # Return metrics. NOTE: This interacts badly with any regular MSE
         # compiled loss. Make it so that only custom metrics are updated?
         # Skip compiled_metrics.update_state() as it conflicts with our custom metrics
-        if self.custom_metrics is not None:
+        metrics_results = {}
+        if self.custom_metrics is not None and len(self.custom_metrics) > 0:
             loss_dict = {}
             loss_dict['loss'] = total_loss
             loss_dict['sigma_loss'] = sigma_loss_cont
@@ -267,7 +268,18 @@ class FreeModel(FSModel):
             # add other loss?
             for m in self.custom_metrics:
                 m.update_state(loss_dict, sample_weight)
-        return {m.name: m.result() for m in self.metrics}
+            metrics_results = {m.name: m.result() for m in self.metrics}
+        else:
+            # Return basic loss information when no custom metrics are provided
+            metrics_results = {
+                'loss': tf.reduce_mean(total_loss),
+                'sigma_loss': tf.reduce_mean(sigma_loss_cont),
+                'kaehler_loss': tf.reduce_mean(cijk_loss),
+                'transition_loss': tf.reduce_mean(t_loss),
+                'ricci_loss': tf.reduce_mean(r_loss),
+                'volk_loss': tf.reduce_mean(volk_loss)
+            }
+        return metrics_results
 
     def test_step(self, data):
         r"""Same as train_step without the outer gradient tape.
@@ -326,7 +338,8 @@ class FreeModel(FSModel):
             total_loss *= sample_weight
         # Return metrics.
         self.compiled_metrics.update_state(y, y_pred, sample_weight)
-        if self.custom_metrics is not None:
+        metrics_results = {}
+        if self.custom_metrics is not None and len(self.custom_metrics) > 0:
             loss_dict = {}
             loss_dict['loss'] = total_loss
             loss_dict['sigma_loss'] = sigma_loss_cont
@@ -337,7 +350,18 @@ class FreeModel(FSModel):
             # add other loss?
             for m in self.custom_metrics:
                 m.update_state(loss_dict, sample_weight)
-        return {m.name: m.result() for m in self.metrics}
+            metrics_results = {m.name: m.result() for m in self.metrics}
+        else:
+            # Return basic loss information when no custom metrics are provided
+            metrics_results = {
+                'loss': tf.reduce_mean(total_loss),
+                'sigma_loss': tf.reduce_mean(sigma_loss_cont),
+                'kaehler_loss': tf.reduce_mean(cijk_loss),
+                'transition_loss': tf.reduce_mean(t_loss),
+                'ricci_loss': tf.reduce_mean(r_loss),
+                'volk_loss': tf.reduce_mean(volk_loss)
+            }
+        return metrics_results
 
     @tf.function
     def to_hermitian(self, x):
