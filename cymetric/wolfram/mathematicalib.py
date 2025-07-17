@@ -24,8 +24,8 @@ from ..pointgen.nphelper import prepare_dataset, prepare_basis_pickle
 def _import_torch_components():
     """Import PyTorch-specific components."""
     try:
-        from ..torch.models.torchmodels import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..torch.models.torchhelper import prepare_basis, train_model
+        from ..torch.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
+        from ..torch.models.helper import prepare_basis, train_model
         from ..torch.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
         return {
             'models': {
@@ -60,8 +60,8 @@ def _import_tensorflow_components():
         import tensorflow.keras as tfk
         tf.get_logger().setLevel('ERROR')
         
-        from ..tensorflow.models.tfmodels import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..tensorflow.models.tfhelper import prepare_basis, train_model
+        from ..tensorflow.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
+        from ..tensorflow.models.helper import prepare_basis, train_model
         from ..tensorflow.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
         return {
             'tf': tf,

@@ -9,8 +9,8 @@ from cymetric import TORCH_AVAILABLE, TENSORFLOW_AVAILABLE, get_preferred_framew
 preferred = get_preferred_framework()
 
 if preferred == 'tensorflow':
-    from cymetric.tensorflow.models.tfmodels import *
+    from cymetric.tensorflow.models.models import *
 elif preferred == 'torch':
-    from cymetric.torch.models.torchmodels import *
+    from cymetric.torch.models.models import *
 else:
-    raise ImportError("No framework (PyTorch or TensorFlow) available for models")
+    raise ImportError("No framework (PyTorch or TensorFlow) available for models module")

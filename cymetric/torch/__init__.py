@@ -22,7 +22,7 @@ except ImportError:
     )
 
 # Import all model classes
-from .models.torchmodels import (
+from .models.models import (
     PhiFSModel,
     MultFSModel, 
     FreeModel,
@@ -33,7 +33,7 @@ from .models.torchmodels import (
 )
 
 # Import helper functions
-from .models.torchhelper import (
+from .models.helper import (
     prepare_basis,
     train_model,
     EarlyStopping

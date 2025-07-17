@@ -6,13 +6,14 @@ TensorFlow models for Calabi-Yau metric learning
 from . import callbacks
 from . import measures  
 from . import fubinistudy
-from . import tfmodels
-from . import tfhelper
+from . import models
+from . import helper
 from . import metrics
 from . import losses
 
 # Also expose commonly used classes and functions
-from .tfmodels import *
+from .models import *
+from .helper import *
 from .measures import *
 from .callbacks import *
 from .fubinistudy import *

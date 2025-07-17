@@ -24,7 +24,7 @@ except ImportError:
     )
 
 # Import all model classes
-from .models.tfmodels import (
+from .models.models import (
     PhiFSModel,
     MultFSModel,
     FreeModel,
@@ -35,7 +35,7 @@ from .models.tfmodels import (
 )
 
 # Import helper functions
-from .models.tfhelper import (
+from .models.helper import (
     prepare_basis,
     train_model
 )
