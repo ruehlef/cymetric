@@ -183,7 +183,7 @@ class FreeModel(FSModel):
             metrics.extend(layer._metrics)
         return metrics
 
-def train_step(self, data):
+    def train_step(self, data):
         r"""Train step of a single batch in model.fit().
 
         NOTE:
