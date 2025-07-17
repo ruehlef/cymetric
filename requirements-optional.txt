@@ -1,0 +1,4 @@
+# Optional dependencies for visualization and analysis
+matplotlib>=3.5.0
+seaborn>=0.11.0
+jupyter>=1.0.0
