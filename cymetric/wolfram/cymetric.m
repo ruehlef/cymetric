@@ -528,7 +528,7 @@ DiscoverPython[useForVENV_:False, OptionsPattern[]] :=
           Print["Version information for Python not available, just using the first one..."];
           exec = pythonEnvs[i]["Executable"];
           ,
-          If[StringTake[pythonEnvs[i]["Version"], 1] != "3" || StringTake[pythonEnvs[i]["Version"], 3] == "3.13",
+          If[StringTake[pythonEnvs[i]["Version"], 1] != "3" || StringTake[pythonEnvs[i]["Version"], 4] == "3.13",
             Continue[]
           ];
           If[!version === Null,
