@@ -105,6 +105,17 @@ try:
 except ImportError:
     # If models not available, define dummy classes
     SigmaLoss = KaehlerLoss = TransitionLoss = RicciLoss = VolkLoss = None
+try:
+    import tensorflow as tf
+    import tensorflow.keras as tfk
+    tf.get_logger().setLevel('ERROR')
+    from ..tensorflow.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
+    from ..tensorflow.models.helper import prepare_basis, train_model
+    from ..tensorflow.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
+except ImportError:
+    from ..torch.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
+    from ..torch.models.helper import prepare_basis, train_model
+    from ..torch.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
 
 from wolframclient.language import wl
 from wolframclient.serializers import export as wlexport
@@ -227,7 +238,7 @@ def train_NN(my_args):
     # get info of generated points
     data = np.load(os.path.join(args['Dir'], 'dataset.npz'))
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
-    kappa = BASIS['KAPPA'].numpy()
+    kappa = BASIS['KAPPA']
 
     # load toric data if exists/needed
     toric_data = None
@@ -272,6 +283,7 @@ def train_NN(my_args):
     args['PrintLosses'][3] = False  # Ricci loss not computed at the moment
     cmetrics = [SigmaLoss(), KaehlerLoss(), TransitionLoss(), RicciLoss(), VolkLoss()]
     cmetrics = [x for x, y in zip(cmetrics, args['PrintLosses']) if y]
+    cmetrics = None  # Don't use metrics anymore
     
     # build model
     if args['Model'] == 'PhiFS' or args['Model'] == 'PhiFSToric':
@@ -336,7 +348,10 @@ def train_NN(my_args):
     fsmodel, training_history = train_model(fsmodel, data, optimizer=optimizer, epochs=args['Epochs'], batch_sizes=args['BatchSizes'], verbose=2, custom_metrics=cmetrics, callbacks=cb_list)
         
     # save trained model
-    fsmodel.model.save(os.path.join(args['Dir'], 'model'))
+    model_path = os.path.join(args['Dir'], 'model.keras')
+    mcy_logger.debug(f"Saving model to: {model_path}")
+    mcy_logger.debug(f"Directory exists: {os.path.exists(args['Dir'])}")
+    fsmodel.model.save(model_path)
     
     return training_history
 
@@ -361,9 +376,9 @@ def get_g(my_args):
             mcy_logger.error("Model set to {}, but {} with toric data not found.".format(args['Model'], args['toric_data_path']))
         
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
-    kappa = BASIS['KAPPA'].numpy()
+    kappa = BASIS['KAPPA']
     pts = tf.convert_to_tensor(pts, dtype=tf.float32)
-    model = tfk.models.load_model(os.path.join(args['Dir'], 'model'))
+    model = tfk.models.load_model(os.path.join(args['Dir'], 'model.keras'))
     if args['Model'] == 'PhiFS':
         fsmodel = PhiFSModel(model, BASIS)
     elif args['Model'] == 'PhiFSToric':
@@ -429,7 +444,7 @@ def get_kahler_potential(my_args):
         
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
     pts = tf.convert_to_tensor(pts, dtype=tf.float32)
-    model = tfk.models.load_model(os.path.join(args['Dir'], 'model'))
+    model = tfk.models.load_model(os.path.join(args['Dir'], 'model.keras'))
     if args['Model'] == 'PhiFS':
         fsmodel = PhiFSModel(model, BASIS)
     elif args['Model'] == 'PhiFSToric':
