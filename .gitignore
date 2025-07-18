@@ -180,3 +180,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 cymetric/models/.DS_Store
+cymetric/pointgen/.DS_Store

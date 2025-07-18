@@ -802,7 +802,7 @@ class ToricModel(FreeModel):
             all_patches = ~self.patch_masks[:, i]
             all_indices = np.where(all_patches)[0]
             fixed_patches[i, all_indices, 0:len(all_indices)] = all_indices * \
-                np.ones((len(all_indices), len(all_indices)), dtype=np.int)
+                np.ones((len(all_indices), len(all_indices)), dtype=int)
         return torch.tensor(fixed_patches, dtype=torch.int64, device=self.device)
 
 

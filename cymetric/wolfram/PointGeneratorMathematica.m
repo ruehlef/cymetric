@@ -155,7 +155,7 @@ pointsOnCY=Flatten[pointsOnCY,1];
 Return[{pointsOnCY,numParamsInPn}];
 )];
 
-GetPointsOnCYToric[dimCY_,CYEqn_,vars_,sections_,patchMasks_,sectionCoords_,sectionMonoms_,GLSMcharges_,precision_]:=Module[{a,i,j,k,l,CYEqnInSections,eq,dimPs,numEqnsInPn,coeffs,newEqn,sectionSol,toricSol,sectionsToToric,toricVarSols,toricVars,pts,patchCoords,scalings,scaleSol,tmpPts,lambdas},( 
+GetPointsOnCYToric[dimCY_,CYEqn_,vars_,sections_,patchMasks_,sectionCoords_,sectionMonoms_,GLSMcharges_,precision_]:=Module[{a,i,j,k,l,CYEqnInSections,eq,dimPs,numEqnsInPn,coeffs,newEqn,sectionSol,toricSol,sectionsToToric,toricVarSols,toricVars,pts,patchCoords,scalings,scaleSol,tmpPts,lambdas,timeoutResult},( 
 dimPs=Table[Length[sections[[i]]],{i,Length[sections]}];(*Length[sections]=h^11 and Length[sections[[i]]]=Number of sections of the i^th KC generator*)
 numEqnsInPn=Table[1,{i,Length[dimPs]}]; (*We initialize with 1 since we include one patch constraint s[a,i]==1 per P^n factor*)
 (*This contains the toric hypersurface equation and the non-complete intersection relations*)
@@ -179,25 +179,33 @@ numEqnsInPn[[j]]+=1;
 Break[];
 ];
 ];
-(*Solve the equations in terms of the s[a,i]*)
-sectionSol=DeleteCases[Quiet[NSolve[eq]],{}];
-sectionsToToric=Flatten[Table[sectionCoords[[a,i]]->sectionMonoms[[a,i]],{a,Length[sectionCoords]},{i,Length[sectionCoords[[a]]]}]];
-(*Find solution in terms of the toric variables*)
-Clear[x];
-toricVars=vars;
-toricVarSols=DeleteCases[Table[FindInstance[(sectionSol[[i]]/. Rule->Equal)/.sectionsToToric,toricVars,Complexes,1]//Chop,{i,Length[sectionSol]}],{}];
-pts=Flatten[toricVars/.toricVarSols,1];
+(*Solve the equations in terms of the s[a,i] with timeout*)
+timeoutResult=TimeConstrained[
+  sectionSol=DeleteCases[Quiet[NSolve[eq]],{}];
+  sectionsToToric=Flatten[Table[sectionCoords[[a,i]]->sectionMonoms[[a,i]],{a,Length[sectionCoords]},{i,Length[sectionCoords[[a]]]}]];
+  (*Find solution in terms of the toric variables*)
+  Clear[x];
+  toricVars=vars;
+  toricVarSols=DeleteCases[Table[FindInstance[(sectionSol[[i]]/. Rule->Equal)/.sectionsToToric,toricVars,Complexes,1]//Chop,{i,Length[sectionSol]}],{}];
+  pts=Flatten[toricVars/.toricVarSols,1];
+  "success"
+, 30, $Failed]; (* 30 second timeout *)
+
+If[timeoutResult===$Failed,
+  Return[{{},numEqnsInPn-Table[1,{i,Length[numEqnsInPn]}]}];
+];
 
 (*pts=Quiet[vars/.NSolve[eq,vars,WorkingPrecision->precision]];*)
 Clear[\[Lambda]];
 lambdas=Table[\[Lambda][k],{k,Length[GLSMcharges]}];
 (*go to patch where largest coordinate is 1*)
-ParallelDo[
+Do[
 Do[
 patchCoords=Flatten[Position[patchMasks[[i]],1]];
 scalings=Times@@Power[lambdas,GLSMcharges];
 eq=Table[1==pts[[l,patchCoords[[j]]]]*scalings[[patchCoords[[j]]]],{j,Length[patchCoords]}];
-scaleSol=Quiet[Solve[eq]];
+scaleSol=Quiet[TimeConstrained[Solve[eq],5,$Failed]]; (* 5 second timeout *)
+If[scaleSol===$Failed,Continue[];];
 If[Length[scaleSol]>0,
 tmpPts=(scalings*pts[[l]])/.scaleSol[[1]];
 ];
@@ -250,7 +258,7 @@ pointsOnCY=Flatten[pointsOnCY,1];
 PrintMsg["Number of points on CY from one ambient space intersection: "<>ToString[numPtsPerSample],frontEnd,verbose];
 
 (*Now generate as many points as needed*)
-numPoints=Ceiling[(numPts-Length[pointsOnCY])/numPtsPerSample];
+numPoints=Ceiling[numPts/numPtsPerSample];
 PrintMsg["Now generating "<>ToString[numPts]<>" points...",frontEnd,verbose];
 
 (*Create system of equations and solve it to find points on CY*)
@@ -265,7 +273,7 @@ If[frontEnd,
    ];
     ,
     If[numPoints<=20*numPtsPerSample,
-    pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic];
+    pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->Automatic];
     ,
     (*Partition in order to provide progress feedback (WolframClient Library ignores messages from subkernels spawned from the kernel used in wl.evaluate(). This negatively impacts performance)*)
     pointsOnCY={};
@@ -275,10 +283,9 @@ If[frontEnd,
     ];
     ];
 ];
-
-pointsOnCY=Join[pointsOnCY,Flatten[newPoints,1]];
 If[Length[pointsOnCY]>numPts,pointsOnCY=pointsOnCY[[1;;numPts]]];
 PrintMsg["done.",frontEnd,verbose];
+pointsOnCY=Flatten[pointsOnCY,1];
 (*PrintMsg["Section distribution: "<>ToString[numEqnsInPn],frontEnd,verbose];*)
 Return[{pointsOnCY,numEqnsInPn}];
 )];

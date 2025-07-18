@@ -163,7 +163,16 @@ class PointGeneratorMathematica(CICYPointGenerator):
             pts = binary_deserialize(pts, consumer=ComplexFunctionConsumer())
         
         self.selected_t = np.array(pts[1], dtype=int)
-        return np.array(pts[0])
+        
+        # Filter out empty points that result from timeouts
+        points = pts[0]
+        if isinstance(points, list):
+            # Remove empty sublists that result from timeout failures
+            points = [p for p in points if p and len(p) > 0]
+            if not points:
+                raise ValueError("No valid points generated - all attempts resulted in timeouts")
+        
+        return np.array(points)
     
     def generate_point_weights(self, n_pw, omega=False, normalize_to_vol_j=False):
         r"""Generates a numpy dictionary of point weights. Uses computed data if Mathematica was used as a frontend.
@@ -355,7 +364,16 @@ class ToricPointGeneratorMathematica(PointGeneratorMathematica):
         
         self.selected_t = np.array(pts[1], dtype=int)
         self.ambient = 2 * self.selected_t
-        return np.array(pts[0])
+        
+        # Filter out empty points that result from timeouts
+        points = pts[0]
+        if isinstance(points, list):
+            # Remove empty sublists that result from timeout failures
+            points = [p for p in points if p and len(p) > 0]
+            if not points:
+                raise ValueError("No valid points generated - all attempts resulted in timeouts")
+
+        return np.array(points)
         
     def _fubini_study_n_metrics(self, points, kfactors=None):
         r"""Computes the FS metric of points.
@@ -370,7 +388,7 @@ class ToricPointGeneratorMathematica(PointGeneratorMathematica):
         kfactors = self.kmoduli if kfactors is None else kfactors
         Js = np.zeros([len(points), len(self.sections[0][0]), len(self.sections[0][0])], dtype=np.complex128)
         for alpha in range(len(kfactors)):
-            ms = np.transpose(np.product([np.power(points, self.sections[alpha][a]) for a in range(len(self.sections[alpha]))], axis=-1), [1, 0])
+            ms = np.transpose(np.prod([np.power(points, self.sections[alpha][a]) for a in range(len(self.sections[alpha]))], axis=-1), [1, 0])
             mss = ms*np.conj(ms)
             kappa_alphas = np.sum(mss, -1)
             J_alphas = 1/(points[:, :, np.newaxis] * np.conj(points[:, np.newaxis, :]))
