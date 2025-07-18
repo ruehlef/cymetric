@@ -8,9 +8,11 @@ for symbolic computations and point generation.
     Fabian Ruehle f.ruehle@northeastern.edu
 """
 
-from .mathematicalib import get_torch_components, get_tensorflow_components
+from .mathematicalib import get_framework_modules, train_NN, get_g, get_kahler_potential
 
 __all__ = [
-    'get_torch_components',
-    'get_tensorflow_components'
+    'get_framework_modules',
+    'train_NN',
+    'get_g', 
+    'get_kahler_potential'
 ]

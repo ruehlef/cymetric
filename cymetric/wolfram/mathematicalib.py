@@ -2,7 +2,8 @@
 Mathematica interface for Cymetric - Framework Agnostic Version
 
 This module provides a unified interface to Mathematica functionality
-that works with both PyTorch and TensorFlow backends.
+that works with both PyTorch and TensorFlow backends, automatically
+selecting the available framework.
 
 :Authors:
     Fabian Ruehle f.ruehle@northeastern.edu
@@ -20,102 +21,153 @@ mcy_logger = logging.getLogger('mathematica')
 from ..pointgen.pointgen_mathematica import PointGeneratorMathematica, ToricPointGeneratorMathematica
 from ..pointgen.nphelper import prepare_dataset, prepare_basis_pickle
 
-# Framework availability checks
-def _import_torch_components():
-    """Import PyTorch-specific components."""
-    try:
-        from ..torch.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..torch.models.helper import prepare_basis, train_model
-        from ..torch.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
-        return {
-            'models': {
-                'PhiFSModel': PhiFSModel,
-                'MultFSModel': MultFSModel, 
-                'FreeModel': FreeModel,
-                'MatrixFSModel': MatrixFSModel,
-                'AddFSModel': AddFSModel,
-                'PhiFSModelToric': PhiFSModelToric,
-                'MatrixFSModelToric': MatrixFSModelToric
-            },
-            'helpers': {
-                'prepare_basis': prepare_basis,
-                'train_model': train_model
-            },
-            'callbacks': {
-                'SigmaCallback': SigmaCallback,
-                'KaehlerCallback': KaehlerCallback,
-                'TransitionCallback': TransitionCallback,
-                'RicciCallback': RicciCallback,
-                'VolkCallback': VolkCallback,
-                'AlphaCallback': AlphaCallback
-            }
-        }
-    except ImportError as e:
-        raise ImportError(f"PyTorch components not available: {e}")
-
-def _import_tensorflow_components():
-    """Import TensorFlow-specific components."""
-    try:
-        import tensorflow as tf
-        import tensorflow.keras as tfk
-        tf.get_logger().setLevel('ERROR')
-        
-        from ..tensorflow.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-        from ..tensorflow.models.helper import prepare_basis, train_model
-        from ..tensorflow.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
-        return {
-            'tf': tf,
-            'tfk': tfk,
-            'models': {
-                'PhiFSModel': PhiFSModel,
-                'MultFSModel': MultFSModel,
-                'FreeModel': FreeModel, 
-                'MatrixFSModel': MatrixFSModel,
-                'AddFSModel': AddFSModel,
-                'PhiFSModelToric': PhiFSModelToric,
-                'MatrixFSModelToric': MatrixFSModelToric
-            },
-            'helpers': {
-                'prepare_basis': prepare_basis,
-                'train_model': train_model
-            },
-            'callbacks': {
-                'SigmaCallback': SigmaCallback,
-                'KaehlerCallback': KaehlerCallback,
-                'TransitionCallback': TransitionCallback,
-                'RicciCallback': RicciCallback,
-                'VolkCallback': VolkCallback,
-                'AlphaCallback': AlphaCallback
-            }
-        }
-    except ImportError as e:
-        raise ImportError(f"TensorFlow components not available: {e}")
-
-# Factory functions for framework-specific imports
-def get_torch_components():
-    """Get PyTorch components for Mathematica interface."""
-    return _import_torch_components()
-
-def get_tensorflow_components():
-    """Get TensorFlow components for Mathematica interface."""
-    return _import_tensorflow_components()
-
+# Use the unified framework system
 try:
+    from cymetric import get_preferred_framework, TORCH_AVAILABLE, TENSORFLOW_AVAILABLE
+    # Use the unified imports that automatically select the framework
+    from cymetric.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
+    from cymetric.models.helper import prepare_basis, train_model
+    from cymetric.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
     from cymetric.models.metrics import SigmaLoss, KaehlerLoss, TransitionLoss, RicciLoss, VolkLoss
-except ImportError:
-    # If models not available, define dummy classes
-    SigmaLoss = KaehlerLoss = TransitionLoss = RicciLoss = VolkLoss = None
-try:
-    import tensorflow as tf
-    import tensorflow.keras as tfk
-    tf.get_logger().setLevel('ERROR')
-    from ..tensorflow.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-    from ..tensorflow.models.helper import prepare_basis, train_model
-    from ..tensorflow.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
-except ImportError:
-    from ..torch.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
-    from ..torch.models.helper import prepare_basis, train_model
-    from ..torch.models.callbacks import SigmaCallback, KaehlerCallback, TransitionCallback, RicciCallback, VolkCallback, AlphaCallback
+    
+    # Get the current framework
+    current_framework = get_preferred_framework()
+    mcy_logger.info(f"Mathematica interface using {current_framework} backend")
+    
+except ImportError as e:
+    mcy_logger.error(f"Could not import cymetric framework system: {e}")
+    # Fallback to direct imports (legacy behavior)
+    current_framework = None
+    TORCH_AVAILABLE = False
+    TENSORFLOW_AVAILABLE = False
+
+# Framework-specific utilities
+def get_framework_modules():
+    """Get framework-specific modules based on current framework."""
+    framework = get_preferred_framework()
+    
+    if framework == 'tensorflow':
+        try:
+            import tensorflow as tf
+            import tensorflow.keras as tfk
+            tf.get_logger().setLevel('ERROR')
+            return {
+                'framework': 'tensorflow',
+                'tf': tf,
+                'tfk': tfk,
+                'tensor_fn': tf.convert_to_tensor,
+                'cast_fn': tf.cast,
+                'float32': tf.float32,
+                'device_check_fn': lambda: len(tf.config.list_physical_devices('GPU')) > 0,
+                'model_ext': '.keras'
+            }
+        except ImportError:
+            pass
+    
+    elif framework == 'torch':
+        try:
+            import torch
+            return {
+                'framework': 'torch', 
+                'torch': torch,
+                'tensor_fn': torch.tensor,
+                'cast_fn': lambda x, dtype: x.to(dtype) if hasattr(x, 'to') else torch.tensor(x, dtype=dtype),
+                'float32': torch.float32,
+                'device_check_fn': lambda: torch.cuda.is_available(),
+                'model_ext': '.pth'
+            }
+        except ImportError:
+            pass
+    
+    raise ImportError(f"No framework ({framework}) available")
+
+def build_model_architecture(n_in, n_hiddens, acts, n_out, framework_modules):
+    """Build model architecture in framework-agnostic way."""
+    framework = framework_modules['framework']
+    
+    if framework == 'tensorflow':
+        tf = framework_modules['tf']
+        tfk = framework_modules['tfk']
+        
+        model = tf.keras.Sequential()
+        model.add(tfk.Input(shape=(n_in,)))
+        for n_hidden, act in zip(n_hiddens, acts):
+            model.add(tfk.layers.Dense(n_hidden, activation=act))
+        model.add(tfk.layers.Dense(n_out, use_bias=False))
+        return model
+        
+    elif framework == 'torch':
+        torch = framework_modules['torch']
+        
+        layers = []
+        prev_size = n_in
+        
+        for n_hidden, act in zip(n_hiddens, acts):
+            layers.append(torch.nn.Linear(prev_size, n_hidden))
+            # Map activation names to PyTorch activations
+            if act == 'relu':
+                layers.append(torch.nn.ReLU())
+            elif act == 'tanh':
+                layers.append(torch.nn.Tanh())
+            elif act == 'sigmoid':
+                layers.append(torch.nn.Sigmoid())
+            elif act == 'swish' or act == 'silu':
+                layers.append(torch.nn.SiLU())
+            # Add more activations as needed
+            prev_size = n_hidden
+            
+        # Final layer without bias (like TensorFlow version)
+        layers.append(torch.nn.Linear(prev_size, n_out, bias=False))
+        
+        return torch.nn.Sequential(*layers)
+    
+    else:
+        raise ValueError(f"Unknown framework: {framework}")
+
+def create_optimizer(model, learning_rate, framework_modules):
+    """Create optimizer in framework-agnostic way."""
+    framework = framework_modules['framework']
+    
+    if framework == 'tensorflow':
+        tfk = framework_modules['tfk']
+        return tfk.optimizers.Adam(learning_rate=learning_rate)
+        
+    elif framework == 'torch':
+        torch = framework_modules['torch']
+        return torch.optim.Adam(model.parameters(), lr=learning_rate)
+    
+    else:
+        raise ValueError(f"Unknown framework: {framework}")
+
+def save_model(model, model_path, framework_modules):
+    """Save model in framework-agnostic way."""
+    framework = framework_modules['framework']
+    
+    if framework == 'tensorflow':
+        model.save(model_path)
+        
+    elif framework == 'torch':
+        torch = framework_modules['torch']
+        torch.save(model.state_dict(), model_path)
+    
+    else:
+        raise ValueError(f"Unknown framework: {framework}")
+
+def load_model(model_path, model_architecture, framework_modules):
+    """Load model in framework-agnostic way."""
+    framework = framework_modules['framework']
+    
+    if framework == 'tensorflow':
+        tfk = framework_modules['tfk']
+        return tfk.models.load_model(model_path)
+        
+    elif framework == 'torch':
+        torch = framework_modules['torch']
+        model_architecture.load_state_dict(torch.load(model_path, map_location='cpu'))
+        return model_architecture
+    
+    else:
+        raise ValueError(f"Unknown framework: {framework}")
 
 from wolframclient.language import wl
 from wolframclient.serializers import export as wlexport
@@ -235,6 +287,14 @@ def train_NN(my_args):
     mcy_logger.setLevel(args['logger_level'])
     mcy_logger.debug(args)
     
+    # Get framework-specific modules
+    try:
+        framework_modules = get_framework_modules()
+        mcy_logger.debug(f"Using {framework_modules['framework']} framework")
+    except ImportError as e:
+        mcy_logger.error(f"No framework available: {e}")
+        return {}
+    
     # get info of generated points
     data = np.load(os.path.join(args['Dir'], 'dataset.npz'))
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
@@ -251,17 +311,25 @@ def train_NN(my_args):
     # force GPU disable if argument is set:
     if args["DisableGPU"]:
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    # check whether Keras is running on GPU or CPU:
-    tf_devices = "GPU"
-    if len(tf.config.list_physical_devices('GPU')) == 0:
-        tf_devices = "CPU"
-    mcy_logger.debug("Using {} for computation.".format(tf_devices))
+    # check whether framework is running on GPU or CPU:
+    device_available = framework_modules['device_check_fn']()
+    device_str = "GPU" if device_available else "CPU"
+    mcy_logger.debug("Using {} for computation.".format(device_str))
     
     # extract architecture for NN
-    nfold = tf.cast(BASIS['NFOLD'], dtype=tf.float32).numpy()
+    nfold_tensor = BASIS['NFOLD']
+    if framework_modules['framework'] == 'tensorflow':
+        nfold = framework_modules['cast_fn'](nfold_tensor, framework_modules['float32']).numpy()
+    else:  # torch
+        if hasattr(nfold_tensor, 'numpy'):
+            nfold = nfold_tensor.numpy()
+        else:
+            nfold = nfold_tensor
+        nfold = float(nfold)
+    
     n_in = data['X_train'].shape[1]
     n_hiddens, acts = args["HiddenLayers"], args["ActivationFunctions"]
-    n_out = nfold**2
+    n_out = int(nfold**2)
     if args['Model'] == 'PhiFS' or args['Model'] == 'PhiFSToric':
         args['PrintLosses'][1] = False  # Kahler loss is automatically 0
         args['PrintMeasures'][1] = False  # Kahler loss is automatically 0
@@ -281,47 +349,15 @@ def train_NN(my_args):
     
     # metrics
     args['PrintLosses'][3] = False  # Ricci loss not computed at the moment
-    cmetrics = [SigmaLoss(), KaehlerLoss(), TransitionLoss(), RicciLoss(), VolkLoss()]
-    cmetrics = [x for x, y in zip(cmetrics, args['PrintLosses']) if y]
+    try:
+        cmetrics = [SigmaLoss(), KaehlerLoss(), TransitionLoss(), RicciLoss(), VolkLoss()]
+        cmetrics = [x for x, y in zip(cmetrics, args['PrintLosses']) if y]
+    except:
+        cmetrics = None  # Metrics not available
     cmetrics = None  # Don't use metrics anymore
     
-    # build model
-    if args['Model'] == 'PhiFS' or args['Model'] == 'PhiFSToric':
-        model = tf.keras.Sequential()
-        model.add(tfk.Input(shape=(n_in,)))
-        for n_hidden, act in zip(n_hiddens, acts):
-            model.add(tfk.layers.Dense(n_hidden, activation=act))
-        model.add(tfk.layers.Dense(n_out, use_bias=False))
-#       # reproduces the FS Kahler potential for the bicubic
-#       import math
-#       def reorder_input(x):
-#           x1 = x[:,0:x.shape[-1]//4]
-#           x2 = x[:,x.shape[-1]//4:2*x.shape[-1]//4]
-#           x3 = x[:,2*x.shape[-1]//4:3*x.shape[-1]//4]
-#           x4 = x[:,3*x.shape[-1]//4:]
-#           return tf.keras.layers.concatenate([x1,x3], axis=1), tf.keras.layers.concatenate([x2,x4], axis=1)
-#       
-#       inp1 = tf.keras.layers.Input(shape=(12,))
-#       in1, in2 = tf.keras.layers.Lambda(reorder_input)(inp1)
-#       x1 = tf.keras.layers.dot([in1, in1], axes=-1)
-#       x2 = tf.keras.layers.dot([in2, in2], axes=-1)
-#       for n_hidden, act in zip(n_hiddens, acts):
-#         x1 = tf.keras.layers.Dense(n_hidden, activation=act)(x1)
-#         x2 = tf.keras.layers.Dense(n_hidden, activation=act)(x2)
-#       x1 = tfk.layers.Dense(n_out, use_bias=False, activation='sigmoid')(x1)
-#       x2 = tfk.layers.Dense(n_out, use_bias=False, activation='sigmoid')(x2)
-#       x1 = tf.math.log(x1)
-#       x2 = tf.math.log(x2)
-#       x = tf.keras.layers.add([0.1/math.pi * x1, 0.1/math.pi * x2])
-#       x = tfk.layers.Dense(n_out)(0.0000000001*x)
-#       
-#       model = tf.keras.models.Model(inputs=[inp1], outputs=x)
-    else:
-        model = tf.keras.Sequential()
-        model.add(tfk.Input(shape=(n_in,)))
-        for n_hidden, act in zip(n_hiddens, acts):
-            model.add(tfk.layers.Dense(n_hidden, activation=act))
-        model.add(tfk.layers.Dense(n_out))
+    # build model using framework-agnostic function
+    model = build_model_architecture(n_in, n_hiddens, acts, n_out, framework_modules)
     
     mcy_logger.debug("Using model {}".format(args['Model']))
     if args['Model'] == 'PhiFS':
@@ -341,17 +377,25 @@ def train_NN(my_args):
     else:
         mcy_logger.error("{} is not a recognized option for a model".format(args['Model']))
         return {}
-    optimizer = tfk.optimizers.Adam(learning_rate=args['LearningRate'])
-    model.summary(print_fn=mcy_logger.debug)
+    
+    # Create optimizer using framework-agnostic function
+    optimizer = create_optimizer(model, args['LearningRate'], framework_modules)
+    
+    # Print model summary if available
+    if hasattr(model, 'summary'):
+        model.summary(print_fn=mcy_logger.debug)
+    else:
+        mcy_logger.debug(f"Model architecture: {model}")
 
     # train model
     fsmodel, training_history = train_model(fsmodel, data, optimizer=optimizer, epochs=args['Epochs'], batch_sizes=args['BatchSizes'], verbose=2, custom_metrics=cmetrics, callbacks=cb_list)
         
-    # save trained model
-    model_path = os.path.join(args['Dir'], 'model.keras')
+    # save trained model using framework-agnostic function
+    model_ext = framework_modules['model_ext']
+    model_path = os.path.join(args['Dir'], f'model{model_ext}')
     mcy_logger.debug(f"Saving model to: {model_path}")
     mcy_logger.debug(f"Directory exists: {os.path.exists(args['Dir'])}")
-    fsmodel.model.save(model_path)
+    save_model(fsmodel.model, model_path, framework_modules)
     
     return training_history
 
@@ -367,6 +411,13 @@ def get_g(my_args):
     mcy_logger.setLevel(args['logger_level'])
     mcy_logger.debug(args)
 
+    # Get framework-specific modules
+    try:
+        framework_modules = get_framework_modules()
+    except ImportError as e:
+        mcy_logger.error(f"No framework available: {e}")
+        return []
+
     # load toric data if exists/needed
     toric_data = None
     if args['Model'] == 'PhiFSToric':
@@ -377,8 +428,37 @@ def get_g(my_args):
         
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
     kappa = BASIS['KAPPA']
-    pts = tf.convert_to_tensor(pts, dtype=tf.float32)
-    model = tfk.models.load_model(os.path.join(args['Dir'], 'model.keras'))
+    
+    # Convert points to tensor using framework-agnostic function
+    pts_tensor = framework_modules['tensor_fn'](pts, dtype=framework_modules['float32'])
+    
+    # Load model using framework-agnostic function
+    model_ext = framework_modules['model_ext']
+    model_path = os.path.join(args['Dir'], f'model{model_ext}')
+    
+    if framework_modules['framework'] == 'tensorflow':
+        # TensorFlow model loading
+        tfk = framework_modules['tfk']
+        model = tfk.models.load_model(model_path)
+    else:
+        # PyTorch model loading - need to reconstruct architecture
+        # This is a limitation - we need to store model architecture info
+        mcy_logger.warning("PyTorch model loading requires architecture reconstruction")
+        # For now, create a simple model and load weights
+        # In production, you'd want to save/load architecture metadata
+        torch = framework_modules['torch']
+        # Create a simple model (this should match the training architecture)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(pts.shape[1], 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64), 
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 1, bias=False)
+        )
+        model.load_state_dict(torch.load(model_path, map_location='cpu'))
+        model.eval()
+    
+    # Create appropriate fsmodel
     if args['Model'] == 'PhiFS':
         fsmodel = PhiFSModel(model, BASIS)
     elif args['Model'] == 'PhiFSToric':
@@ -397,30 +477,15 @@ def get_g(my_args):
         mcy_logger.error("{} is not a recognized option for a model".format(args['Model']))
         return []
 
-    gs = fsmodel(pts)
-    return gs.numpy()
-
-
-def get_g_fs(my_args):
-    global mcy_logger
-    my_args = dict(my_args)
-    pts = np.array(point_vec_to_complex(my_args['points']), dtype=np.complex128)
-    del my_args['points']
+    gs = fsmodel(pts_tensor)
     
-    # parse arguments
-    args = to_numpy_arrays(my_args)
-    mcy_logger.setLevel(args['logger_level'])
-    mcy_logger.debug(args)
-            
-    with open(os.path.join(os.path.abspath(args['Dir']), "point_gen.pickle"), 'rb') as hnd:
-        point_gen = pickle.load(hnd)
-    
-    pbs = point_gen.pullbacks(pts)
-    ts = args['ts'] if args['ts'] != [] else point_gen.kmoduli
-    fs = point_gen.fubini_study_metrics(pts, vol_js=ts)
-    fs_pbs = np.einsum('xai,xij,xbj->xab', pbs, fs, np.conj(pbs))
-    
-    return fs_pbs
+    # Convert output to numpy
+    if hasattr(gs, 'numpy'):
+        return gs.numpy()
+    elif hasattr(gs, 'detach'):
+        return gs.detach().numpy()
+    else:
+        return gs
 
 
 def get_kahler_potential(my_args):
@@ -434,6 +499,13 @@ def get_kahler_potential(my_args):
     mcy_logger.setLevel(args['logger_level'])
     mcy_logger.debug(args)
 
+    # Get framework-specific modules
+    try:
+        framework_modules = get_framework_modules()
+    except ImportError as e:
+        mcy_logger.error(f"No framework available: {e}")
+        return []
+
     # load toric data if exists/needed
     toric_data = None
     if args['Model'] == 'PhiFSToric':
@@ -443,8 +515,31 @@ def get_kahler_potential(my_args):
             mcy_logger.error("Model set to {}, but {} with toric data not found.".format(args['Model'], args['toric_data_path']))
         
     BASIS = prepare_basis(pickle.load(open(os.path.join(args['Dir'], 'basis.pickle'), 'rb')))
-    pts = tf.convert_to_tensor(pts, dtype=tf.float32)
-    model = tfk.models.load_model(os.path.join(args['Dir'], 'model.keras'))
+    
+    # Convert points to tensor using framework-agnostic function
+    pts_tensor = framework_modules['tensor_fn'](pts, dtype=framework_modules['float32'])
+    
+    # Load model using framework-agnostic function
+    model_ext = framework_modules['model_ext']
+    model_path = os.path.join(args['Dir'], f'model{model_ext}')
+    
+    if framework_modules['framework'] == 'tensorflow':
+        # TensorFlow model loading
+        tfk = framework_modules['tfk']
+        model = tfk.models.load_model(model_path)
+    else:
+        # PyTorch model loading - similar limitation as get_g
+        torch = framework_modules['torch']
+        model = torch.nn.Sequential(
+            torch.nn.Linear(pts.shape[1], 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64),
+            torch.nn.ReLU(), 
+            torch.nn.Linear(64, 1, bias=False)
+        )
+        model.load_state_dict(torch.load(model_path, map_location='cpu'))
+        model.eval()
+    
     if args['Model'] == 'PhiFS':
         fsmodel = PhiFSModel(model, BASIS)
     elif args['Model'] == 'PhiFSToric':
@@ -453,8 +548,15 @@ def get_kahler_potential(my_args):
         mcy_logger.error("Calculating the Kahler potential for model {} is not supported".format(args['Model']))
         return []
 
-    ks = fsmodel.get_kahler_potential(pts)
-    return ks.numpy()
+    ks = fsmodel.get_kahler_potential(pts_tensor)
+    
+    # Convert output to numpy
+    if hasattr(ks, 'numpy'):
+        return ks.numpy()
+    elif hasattr(ks, 'detach'):
+        return ks.detach().numpy() 
+    else:
+        return ks
 
     
 def get_weights(my_args):

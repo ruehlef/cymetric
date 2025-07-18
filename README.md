@@ -18,6 +18,11 @@ If you want to use any existing python installation (note that we recommend usin
 ```console
 pip install git+https://github.com/ruehlef/cymetric.git
 ```
+This will automatically:
+- ✅ Install PyTorch on Python 3.8+ 
+- ✅ Install TensorFlow on Python 3.8-3.12
+- ⚠️  Skip TensorFlow on Python 3.13+ (not yet supported)
+- 📦 Always install core dependencies
 
 To run the example notebooks, you need jupyter. You can install it with
 ```console
@@ -95,11 +100,11 @@ This will open jupyter in your web browser. Navigate to the folder where you dow
 3. In [3.Sage_integration_.ipynb](notebooks/3.Sage_integration_example.ipynb) we illustrate how to run the package from within Sage to compute the CY metric on a Kreuzer-Skarke model.
 4. In [Mathematica_integration_example.nb](/notebooks/4.Mathematica_integration_example.nb), we illustrate how to call the PointGenerators and the TensorFlow models for training and evaluation. Furthermore, there are arbitrary precision PointGenerators based on the wolfram language.
 
-# Cymetric Framework Selection
+## Cymetric Framework Selection
 
 This document describes how to control which framework (PyTorch or TensorFlow) is used by the cymetric compatibility layer.
 
-## Default Behavior
+### Default Behavior
 
 When both PyTorch and TensorFlow are installed, cymetric defaults to the faster **TensorFlow**:
 
@@ -109,9 +114,9 @@ from cymetric.models.measures import ricci_measure
 print(ricci_measure.__module__)  # cymetric.tensorflow.models.measures
 ```
 
-## Framework Selection Methods
+### Framework Selection Methods
 
-### Method 1: Environment Variable (Recommended)
+#### Method 1: Environment Variable (Recommended)
 
 Set the `CYMETRIC_FRAMEWORK` environment variable before importing cymetric:
 
@@ -130,7 +135,7 @@ from cymetric.models.measures import ricci_measure
 
 Valid values: `'torch'`, `'pytorch'`, `'tf'`, `'tensorflow'`
 
-### Method 2: Runtime Switching
+#### Method 2: Runtime Switching
 
 Change the framework after importing cymetric:
 
@@ -143,7 +148,7 @@ cymetric.set_preferred_framework('torch')
 from cymetric.models.measures import ricci_measure  # Now uses PyTorch
 ```
 
-### Method 3: Check Current Framework
+#### Method 3: Check Current Framework
 
 ```python
 import cymetric
@@ -151,7 +156,7 @@ print(f"Available frameworks: PyTorch={cymetric.TORCH_AVAILABLE}, TensorFlow={cy
 print(f"Currently using: {cymetric.PREFERRED_FRAMEWORK}")
 ```
 
-## Direct Framework Access
+### Direct Framework Access
 
 You can always import from specific frameworks directly:
 
@@ -163,7 +168,7 @@ from cymetric.torch.models.measures import ricci_measure
 from cymetric.tensorflow.models.measures import ricci_measure
 ```
 
-## Compatibility Layer Modules
+### Compatibility Layer Modules
 
 The following modules support automatic framework selection:
 
