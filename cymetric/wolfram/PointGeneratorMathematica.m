@@ -137,7 +137,7 @@ If[frontEnd,
     ,Row[{ProgressIndicator[5(j-1),{1,100}],ToString[5 (j-1)]<>"/100"},"   "]
    ];
     ,
-    If[verbose==0||numPoints<=20*numPtsPerSample,
+    If[numPoints<=20*numPtsPerSample,
     pointsOnCY=ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,numPoints},DistributedContexts->Automatic];
     ,
     (*Partition in order to provide progress feedback (WolframClient Library ignores messages from subkernels spawned from the kernel used in wl.evaluate(). This negatively impacts performance)*)
@@ -210,7 +210,7 @@ Break[];
 Return[{pts,numEqnsInPn-Table[1,{i,Length[numEqnsInPn]}]}];
 )];
 
-GenerateToricPointsM[numPts_,dimCY_,coefficients_,exponents_,sections_,sectionRelationCoeffs_,sectionRelationExps_,patchMasks_,GLSMcharges_,precision_:20,verbose_:0,frontEnd_:False]:= Module[{vars,CYeqn,i,j,k,sectionCoords,sectionCoordsFlat,expSectionsFlat,nonCIRelations,secRel,linEqCoeffs,lineqs,toricToSections,sectionMonoms,numPoints,params,allEqns,pointsOnCY,newPoints,numPtsPerSample,numEqnsInPn},( 
+GenerateToricPointsM[numPts_,dimCY_,coefficients_,exponents_,sections_,sectionRelationCoeffs_,sectionRelationExps_,patchMasks_,GLSMcharges_,precision_:20,verbose_:0,frontEnd_:False]:= Module[{vars,CYeqn,i,j,k,sectionCoords,sectionCoordsFlat,expSectionsFlat,nonCIRelations,secRel,linEqCoeffs,lineqs,toricToSections,sectionMonoms,numPoints,params,allEqns,pointsOnCY,newPoints,numPtsPerSample,numEqnsInPn,low},( 
 vars=Table[Subscript[x,i],{i,Length[sections]+dimCY+1}];
 
 (*Construct the CY equation in terms of the sections*)
@@ -255,19 +255,27 @@ PrintMsg["Now generating "<>ToString[numPts]<>" points...",frontEnd,verbose];
 
 (*Create system of equations and solve it to find points on CY*)
 If[frontEnd,
-    newPoints=ResourceFunction["MonitorProgress"][ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->Automatic]];
+    (*newPoints=ResourceFunction["MonitorProgress"][ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->Automatic]];*)
+    pointsOnCY={};
+    Monitor[
+    For[j=1,j<=20,j++,
+    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic]];
+    ];
+    ,Row[{ProgressIndicator[5(j-1),{1,100}],ToString[5 (j-1)]<>"/100"},"   "]
+   ];
     ,
-    If[verbose==0,
-    newPoints=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->Automatic];
+    If[numPoints<=20*numPtsPerSample,
+    pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic];
     ,
     (*Partition in order to provide progress feedback (WolframClient Library ignores messages from subkernels spawned from the kernel used in wl.evaluate(). This negatively impacts performance)*)
-    newPoints={};
-    For[i=1,i<=20,i++,
-    PrintMsg["Generated "<>ToString[5 (i-1)]<>"% of points",frontEnd,verbose];
-    newPoints=Join[newPoints,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic]];
+    pointsOnCY={};
+    For[j=1,j<=20,j++,
+    PrintMsg["Generated "<>ToString[5 (j-1)]<>"% of points",frontEnd,verbose];
+    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic]];
     ];
     ];
 ];
+
 pointsOnCY=Join[pointsOnCY,Flatten[newPoints,1]];
 If[Length[pointsOnCY]>numPts,pointsOnCY=pointsOnCY[[1;;numPts]]];
 PrintMsg["done.",frontEnd,verbose];
