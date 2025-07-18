@@ -118,7 +118,7 @@ StyleBox[\")\",\nFontWeight->\"Bold\"]\)\!\(\*
 StyleBox[\":\",\nFontWeight->\"Bold\"]\)
 * GetPullbacks:                Calculates the pullbacks from the ambient space coordinates to the CY at the given points. You should not have to call this manually
 * GetSession:                   Resets the Python session. You should never have to call this manually
-* DiscoverPython:            Finds a Python executable for python3 with version <3.10. You should not have to call this manually
+* DiscoverPython:            Finds a Python executable for python3 with version <3.13. You should not have to call this manually
 * SetupPythonVENV:       Sets up a Python virtual environment. You should not have to call this manually
 * ToPython:                      Converts input to Python form. You should never have to call this manually.
 "
@@ -513,17 +513,22 @@ DiscoverPython[useForVENV_:False, OptionsPattern[]] :=
     (
       version = OptionValue["Version"];
       pythonEnvs = FindExternalEvaluators["Python", "ResetCache" -> True];
-      pythonEnvs = Reverse[SortBy[pythonEnvs, "Version"]]; (*Start with latest Python on the system and work your way down. ATM, there's no TF for python 3.10, so we skip that*)
+      pythonEnvs=Normal[FindExternalEvaluators["Python", "ResetCache" -> True]];
+	  pythonEnvs=AssociationThread[Keys[pythonEnvs],MapThread[Append,{Values[pythonEnvs],Map[<|"Version"->#|>&,Table[StringDrop[ResourceFunction["PythonVersion"][pythonEnvs[[i]]["Executable"]],7],{i,Length[pythonEnvs]}]]}]];
+	  parseVersion[ver_String]:=ToExpression@StringSplit[ver,"."];
+	  pythonEnvs=Dataset[pythonEnvs];
+	  pythonEnvs=pythonEnvs[All,Append[#,"ParsedVersion"->parseVersion[#Version]]&];
+	  pythonEnvs = Reverse[SortBy[pythonEnvs, "ParsedVersion"]]; (*Start with latest Python on the system and work your way down. ATM, there's no TF for python 3.13, so we skip that*)
       Print["Mathematica discovered the following Python environments on your system:"
         ];
       Print[pythonEnvs];
-      Print["Looking for Python 3"];
+      Print["Looking for Python"];
       For[i = 1, i <= Length[pythonEnvs], i++,
         If[!MemberQ[Keys[pythonEnvs[[i]]],"Version"],
           Print["Version information for Python not available, just using the first one..."];
           exec = pythonEnvs[i]["Executable"];
           ,
-          If[StringTake[pythonEnvs[i]["Version"], 1] != "3" || StringTake[pythonEnvs[i]["Version"], 3] == "3.10",
+          If[StringTake[pythonEnvs[i]["Version"], 1] != "3" || StringTake[pythonEnvs[i]["Version"], 3] == "3.13",
             Continue[]
           ];
           If[!version === Null,
