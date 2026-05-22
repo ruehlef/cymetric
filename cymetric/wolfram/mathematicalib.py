@@ -2,7 +2,7 @@
 Mathematica interface for Cymetric - Framework Agnostic Version
 
 This module provides a unified interface to Mathematica functionality
-that works with both PyTorch and TensorFlow backends, automatically
+that works with PyTorch, TensorFlow, and JAX backends, automatically
 selecting the available framework.
 
 :Authors:
@@ -23,7 +23,7 @@ from ..pointgen.nphelper import prepare_dataset, prepare_basis_pickle
 
 # Use the unified framework system
 try:
-    from cymetric import get_preferred_framework, TORCH_AVAILABLE, TENSORFLOW_AVAILABLE
+    from cymetric import get_preferred_framework, TORCH_AVAILABLE, TENSORFLOW_AVAILABLE, JAX_AVAILABLE
     # Use the unified imports that automatically select the framework
     from cymetric.models.models import PhiFSModel, MultFSModel, FreeModel, MatrixFSModel, AddFSModel, PhiFSModelToric, MatrixFSModelToric
     from cymetric.models.helper import prepare_basis, train_model
@@ -40,6 +40,7 @@ except ImportError as e:
     current_framework = None
     TORCH_AVAILABLE = False
     TENSORFLOW_AVAILABLE = False
+    JAX_AVAILABLE = False
 
 # Framework-specific utilities
 def get_framework_modules():
@@ -75,6 +76,29 @@ def get_framework_modules():
                 'float32': torch.float32,
                 'device_check_fn': lambda: torch.cuda.is_available(),
                 'model_ext': '.pth'
+            }
+        except ImportError:
+            pass
+    
+    elif framework == 'jax':
+        try:
+            import jax
+            import jax.numpy as jnp
+            import equinox as eqx
+            import optax
+            return {
+                'framework': 'jax',
+                'jax': jax,
+                'jnp': jnp,
+                'eqx': eqx,
+                'optax': optax,
+                'tensor_fn': jnp.array,
+                'cast_fn': lambda x, dtype: jnp.array(x, dtype=dtype),
+                'float32': jnp.float32,
+                'device_check_fn': lambda: any(
+                    'gpu' in d.device_kind.lower() for d in jax.devices()
+                ),
+                'model_ext': '.eqx'
             }
         except ImportError:
             pass
@@ -121,6 +145,34 @@ def build_model_architecture(n_in, n_hiddens, acts, n_out, framework_modules):
         
         return torch.nn.Sequential(*layers)
     
+    elif framework == 'jax':
+        import jax
+        import jax.nn as jnn
+        eqx = framework_modules['eqx']
+        
+        layers = []
+        prev_size = n_in
+        key = jax.random.PRNGKey(0)
+        
+        for n_hidden, act in zip(n_hiddens, acts):
+            key, subkey = jax.random.split(key)
+            layers.append(eqx.nn.Linear(prev_size, n_hidden, key=subkey))
+            if act == 'relu':
+                layers.append(eqx.nn.Lambda(jnn.relu))
+            elif act == 'tanh':
+                layers.append(eqx.nn.Lambda(jnn.tanh))
+            elif act == 'sigmoid':
+                layers.append(eqx.nn.Lambda(jnn.sigmoid))
+            elif act in ('swish', 'silu'):
+                layers.append(eqx.nn.Lambda(jnn.swish))
+            elif act == 'gelu':
+                layers.append(eqx.nn.Lambda(jnn.gelu))
+            prev_size = n_hidden
+        
+        key, subkey = jax.random.split(key)
+        layers.append(eqx.nn.Linear(prev_size, n_out, use_bias=False, key=subkey))
+        return eqx.nn.Sequential(layers)
+    
     else:
         raise ValueError(f"Unknown framework: {framework}")
 
@@ -136,6 +188,10 @@ def create_optimizer(model, learning_rate, framework_modules):
         torch = framework_modules['torch']
         return torch.optim.Adam(model.parameters(), lr=learning_rate)
     
+    elif framework == 'jax':
+        optax = framework_modules['optax']
+        return optax.adam(learning_rate)
+    
     else:
         raise ValueError(f"Unknown framework: {framework}")
 
@@ -149,6 +205,10 @@ def save_model(model, model_path, framework_modules):
     elif framework == 'torch':
         torch = framework_modules['torch']
         torch.save(model.state_dict(), model_path)
+    
+    elif framework == 'jax':
+        eqx = framework_modules['eqx']
+        eqx.tree_serialise_leaves(model_path, model)
     
     else:
         raise ValueError(f"Unknown framework: {framework}")
@@ -165,6 +225,10 @@ def load_model(model_path, model_architecture, framework_modules):
         torch = framework_modules['torch']
         model_architecture.load_state_dict(torch.load(model_path, map_location='cpu'))
         return model_architecture
+    
+    elif framework == 'jax':
+        eqx = framework_modules['eqx']
+        return eqx.tree_deserialise_leaves(model_path, model_architecture)
     
     else:
         raise ValueError(f"Unknown framework: {framework}")
@@ -320,6 +384,8 @@ def train_NN(my_args):
     nfold_tensor = BASIS['NFOLD']
     if framework_modules['framework'] == 'tensorflow':
         nfold = framework_modules['cast_fn'](nfold_tensor, framework_modules['float32']).numpy()
+    elif framework_modules['framework'] == 'jax':
+        nfold = float(framework_modules['jnp'].array(nfold_tensor, dtype=framework_modules['float32']))
     else:  # torch
         if hasattr(nfold_tensor, 'numpy'):
             nfold = nfold_tensor.numpy()
@@ -440,6 +506,18 @@ def get_g(my_args):
         # TensorFlow model loading
         tfk = framework_modules['tfk']
         model = tfk.models.load_model(model_path)
+    elif framework_modules['framework'] == 'jax':
+        # JAX/equinox model loading — reconstruct architecture then deserialise
+        mcy_logger.warning("JAX model loading requires architecture reconstruction")
+        eqx = framework_modules['eqx']
+        nfold_tensor = BASIS['NFOLD']
+        nfold = float(framework_modules['jnp'].array(nfold_tensor))
+        n_in = pts.shape[1]
+        n_out = int(nfold ** 2)
+        if args['Model'] in ('PhiFS', 'PhiFSToric'):
+            n_out = 1
+        model_arch = build_model_architecture(n_in, [64, 64], ['relu', 'relu'], n_out, framework_modules)
+        model = load_model(model_path, model_arch, framework_modules)
     else:
         # PyTorch model loading - need to reconstruct architecture
         # This is a limitation - we need to store model architecture info
@@ -485,7 +563,7 @@ def get_g(my_args):
     elif hasattr(gs, 'detach'):
         return gs.detach().numpy()
     else:
-        return gs
+        return np.array(gs)
 
 
 def get_g_fs(my_args):
@@ -549,6 +627,16 @@ def get_kahler_potential(my_args):
         # TensorFlow model loading
         tfk = framework_modules['tfk']
         model = tfk.models.load_model(model_path)
+    elif framework_modules['framework'] == 'jax':
+        # JAX/equinox model loading — reconstruct architecture then deserialise
+        mcy_logger.warning("JAX model loading requires architecture reconstruction")
+        eqx = framework_modules['eqx']
+        nfold_tensor = BASIS['NFOLD']
+        nfold = float(framework_modules['jnp'].array(nfold_tensor))
+        n_in = pts.shape[1]
+        n_out = 1  # PhiFS models always output 1
+        model_arch = build_model_architecture(n_in, [64, 64], ['relu', 'relu'], n_out, framework_modules)
+        model = load_model(model_path, model_arch, framework_modules)
     else:
         # PyTorch model loading - similar limitation as get_g
         torch = framework_modules['torch']
@@ -578,7 +666,7 @@ def get_kahler_potential(my_args):
     elif hasattr(ks, 'detach'):
         return ks.detach().numpy() 
     else:
-        return ks
+        return np.array(ks)
 
     
 def get_weights(my_args):

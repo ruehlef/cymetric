@@ -3,7 +3,7 @@
 ![CYMetric plots](/assets/plots.jpg)
 
 cymetric is a Python package for learning of moduli-dependent Calabi-Yau metrics
-using neural networks implemented in TensorFlow. This repository contains an updated version that works with tensorflow 2 and Mathematica 13 or older. It also contains a port to pytorch, which was auto-generated with GitHub copilot. The torch implementation is slower than the tensorflow implementation, since some functions could be XLA-compiled in tensorflow, but the torch-compiler did not support the necessary operations.
+using neural networks implemented in TensorFlow, PyTorch, and JAX. This repository contains an updated version that works with tensorflow 2 and Mathematica 13 or older. It also contains a port to pytorch, which was auto-generated with GitHub copilot, and a JAX implementation using Equinox and Optax.
 
 ## Features
 
@@ -21,8 +21,16 @@ pip install git+https://github.com/ruehlef/cymetric.git
 This will automatically:
 - ✅ Install PyTorch on Python 3.8+ 
 - ✅ Install TensorFlow on Python 3.8-3.12
+- ✅ Install JAX on Python 3.9+
 - ⚠️  Skip TensorFlow on Python 3.13+ (not yet supported)
 - 📦 Always install core dependencies
+
+To install a specific framework only:
+```console
+pip install "cymetric[tensorflow] @ git+https://github.com/ruehlef/cymetric.git"
+pip install "cymetric[torch] @ git+https://github.com/ruehlef/cymetric.git"
+pip install "cymetric[jax] @ git+https://github.com/ruehlef/cymetric.git"
+```
 
 To run the example notebooks, you need jupyter. You can install it with
 ```console
@@ -107,7 +115,7 @@ This document describes how to control which framework (PyTorch or TensorFlow) i
 
 ### Default Behavior
 
-When both PyTorch and TensorFlow are installed, cymetric defaults to the faster **TensorFlow**:
+When multiple frameworks are installed, cymetric defaults to the **TensorFlow** backend, then **JAX**, then **PyTorch**:
 
 ```python
 import cymetric
@@ -122,19 +130,19 @@ print(ricci_measure.__module__)  # cymetric.tensorflow.models.measures
 Set the `CYMETRIC_FRAMEWORK` environment variable before importing cymetric:
 
 ```bash
-export CYMETRIC_FRAMEWORK=torch
+export CYMETRIC_FRAMEWORK=jax
 python your_script.py
 ```
 
 Or in Python:
 ```python
 import os
-os.environ['CYMETRIC_FRAMEWORK'] = 'torch'  # Must be before importing cymetric
+os.environ['CYMETRIC_FRAMEWORK'] = 'jax'  # Must be before importing cymetric
 import cymetric
 from cymetric.models.measures import ricci_measure
 ```
 
-Valid values: `'torch'`, `'pytorch'`, `'tf'`, `'tensorflow'`
+Valid values: `'torch'`, `'pytorch'`, `'tf'`, `'tensorflow'`, `'jax'`, `'equinox'`
 
 #### Method 2: Runtime Switching
 
@@ -143,6 +151,10 @@ Change the framework after importing cymetric:
 ```python
 import cymetric
 from cymetric.models.measures import ricci_measure  # Uses default (TensorFlow)
+
+# Switch to JAX
+cymetric.set_preferred_framework('jax')
+from cymetric.models.measures import ricci_measure  # Now uses JAX
 
 # Switch to PyTorch
 cymetric.set_preferred_framework('torch')
@@ -153,7 +165,7 @@ from cymetric.models.measures import ricci_measure  # Now uses PyTorch
 
 ```python
 import cymetric
-print(f"Available frameworks: PyTorch={cymetric.TORCH_AVAILABLE}, TensorFlow={cymetric.TENSORFLOW_AVAILABLE}")
+print(f"Available frameworks: PyTorch={cymetric.TORCH_AVAILABLE}, TensorFlow={cymetric.TENSORFLOW_AVAILABLE}, JAX={cymetric.JAX_AVAILABLE}")
 print(f"Currently using: {cymetric.PREFERRED_FRAMEWORK}")
 ```
 
@@ -167,6 +179,9 @@ from cymetric.torch.models.measures import ricci_measure
 
 # Always use TensorFlow  
 from cymetric.tensorflow.models.measures import ricci_measure
+
+# Always use JAX
+from cymetric.jax.models.measures import ricci_measure
 ```
 
 ### Compatibility Layer Modules
@@ -178,8 +193,8 @@ The following modules support automatic framework selection:
 - `cymetric.models.losses`
 - `cymetric.models.metrics`
 - `cymetric.models.fubinistudy`
-- `cymetric.models.torchmodels` / `cymetric.models.tfmodels`
-- `cymetric.models.torchhelper` / `cymetric.models.tfhelper`
+- `cymetric.models.models`
+- `cymetric.models.helper`
 
 All of these automatically redirect to the appropriate framework implementation.
 

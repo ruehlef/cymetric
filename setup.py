@@ -77,7 +77,7 @@ setup(
     version=get_version(),
     author="Fabian Ruehle",
     author_email="f.ruehle@northeastern.edu",
-    description="A unified package for learning Calabi-Yau metrics using PyTorch and TensorFlow",
+    description="A unified package for learning Calabi-Yau metrics using PyTorch, TensorFlow, and JAX",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
     url="https://github.com/ruehlef/cymetric",
@@ -101,8 +101,12 @@ setup(
     extras_require={
         "torch": get_requirements('requirements-torch.txt'),
         "tensorflow": get_requirements('requirements-tensorflow.txt'),
+        "jax": get_requirements('requirements-jax.txt'),
         "both": (get_requirements('requirements-torch.txt') + 
                 get_requirements('requirements-tensorflow.txt')),
+        "all": (get_requirements('requirements-torch.txt') + 
+               get_requirements('requirements-tensorflow.txt') +
+               get_requirements('requirements-jax.txt')),
         "minimal": get_requirements('requirements-core.txt'),
         "optional": get_requirements('requirements-optional.txt'),
     },

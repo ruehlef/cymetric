@@ -27,6 +27,12 @@ def can_install_torch():
     # PyTorch generally has broader Python version support
     return version >= (3, 8)
 
+def can_install_jax():
+    """Check if JAX can be installed on this Python version."""
+    version = sys.version_info
+    # JAX supports Python 3.9+
+    return version >= (3, 9)
+
 def framework_available(framework_name):
     """Check if a framework is already installed."""
     try:
@@ -44,6 +50,9 @@ def get_compatible_frameworks():
         
     if can_install_tensorflow():
         compatible.append('tensorflow')
+
+    if can_install_jax():
+        compatible.append('jax')
         
     return compatible
 
@@ -64,6 +73,12 @@ def print_installation_info():
         print(f"TensorFlow: {status}")
     else:
         print("TensorFlow: ✗ not compatible with this Python version")
+
+    if 'jax' in compatible:
+        status = "✓ installed" if framework_available('jax') else "○ will be installed"
+        print(f"JAX (equinox/optax): {status}")
+    else:
+        print("JAX: ✗ not compatible with this Python version")
         
     if not compatible:
         print("⚠️  Warning: No frameworks compatible. Installing core package only.")
