@@ -94,7 +94,7 @@ PathToVenv = FileNameJoin[{$HomeDirectory, "cymetric"}];
 ChangeSetting["Python", PathToVenv]
 python = Setup[PathToVenv];
 ```
-Note that this will create a .m file (in the same folder and with the same name as the mathematica notebook) which stores the location of the virtual environment. If you delete this file, mathematica will install a new virtual environment the next time you call ```Setup[PathToVenv]```.
+Note that this will create a .m file (in the same folder and with the same name as the Mathematica notebook) which stores the location of the virtual environment. If you delete this file, Mathematica will install a new virtual environment the next time you call ```Setup[PathToVenv]```.
 
 ## Tutorials
 Once you have installed the package (either in python, or in sage, or in Mathematica), you are probably looking for some examples on how to use it. We provide some tutorials/examples for each case. Just download the example file somewhere on your computer and open it in jupyter. If you created a virtual environment as explained above, you can simply open a terminal and type
@@ -103,7 +103,7 @@ jupyter notebook
 ```
 This will open jupyter in your web browser. Navigate to the folder where you downloaded the files and click on them to open.
 
-0. In [1.PointGenerator.ipynb](notebooks/0.GettingStarted.ipynb) you get a pipeline to generate points and learn the metric for the Quintic, both in pytorch and tensorflow.
+0. In [1.PointGenerator.ipynb](notebooks/0.GettingStarted.ipynb) you get a pipeline to generate points and learn the metric for the Quintic, in tensorflow, pytorch, and jax.
 1. In [1.PointGenerator.ipynb](notebooks/1.PointGenerator.ipynb) we explore the different PointGenerators for codimension-1 CICY, general CICYs and CY in toric varieties on the Fermat Quintic. 
 2. In [2.TensorFlow_models.ipynb](notebooks/2.TensorFlow_models.ipynb) we explore some of the TF custom models with the data generated in the first notebook. 
 3. In [3.Sage_integration_.ipynb](notebooks/3.Sage_integration_example.ipynb) we illustrate how to run the package from within Sage to compute the CY metric on a Kreuzer-Skarke model.
