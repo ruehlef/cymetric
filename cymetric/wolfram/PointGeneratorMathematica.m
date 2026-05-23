@@ -189,7 +189,7 @@ Break[];
 
 (*Solve for the section values, then invert to toric vars via log-linear algebra*)
 timeoutResult=TimeConstrained[
-  sectionSol=DeleteCases[Quiet[NSolve[eq,sectionCoordsFlat,WorkingPrecision->precision]],{}];
+  sectionSol=DeleteCases[Quiet[NSolve[eq]],{}];
   toricVarSols=Table[
     Module[{sv,lS,lX},
       sv=sectionCoordsFlat/.sectionSol[[i]];
@@ -266,11 +266,14 @@ ParallelEvaluate[
 
 {pointsOnCY,numEqnsInPn}=GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision];
 
-pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,10},DistributedContexts->None];
-numPtsPerSample=Min[Table[Length[pointsOnCY[[i]]],{i,Length[pointsOnCY]}]];
-pointsOnCY=Flatten[pointsOnCY,1];
+pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,10},DistributedContexts->Automatic];
+If[Length[DeleteCases[Table[Length[pointsOnCY[[i]]],{i,Length[pointsOnCY]}],0]]==0,
+  PrintMsg["All trial runs returned 0 points; aborting.", frontEnd, verbose];
+  Return[{{}, numEqnsInPn}]
+];
+numPtsPerSample=Min[DeleteCases[Table[Length[pointsOnCY[[i]]],{i,Length[pointsOnCY]}],0]];
 PrintMsg["Number of points on CY from one ambient space intersection: "<>ToString[numPtsPerSample],frontEnd,verbose];
-
+pointsOnCY=Flatten[pointsOnCY,1];
 numPoints=Ceiling[numPts/numPtsPerSample];
 PrintMsg["Now generating "<>ToString[numPts]<>" points...",frontEnd,verbose];
 
@@ -278,18 +281,18 @@ If[frontEnd,
     pointsOnCY={};
     Monitor[
     For[j=1,j<=20,j++,
-    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->None]];
+    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic]];
     ];
     ,Row[{ProgressIndicator[5(j-1),{1,100}],ToString[5(j-1)]<>"/100"},"   "]
    ];
     ,
     If[numPoints<=20*numPtsPerSample,
-    pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->None];
+    pointsOnCY=ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,numPoints},DistributedContexts->Automatic];
     ,
     pointsOnCY={};
     For[j=1,j<=20,j++,
     PrintMsg["Generated "<>ToString[5(j-1)]<>"% of points",frontEnd,verbose];
-    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->None]];
+    pointsOnCY=Join[pointsOnCY,ParallelTable[GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision][[1]],{p,Ceiling[numPoints/20]},DistributedContexts->Automatic]];
     ];
     ];
 ];
