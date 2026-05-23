@@ -259,6 +259,10 @@ sectionMonoms=Table[Table[Times@@(vars^sections[[i,j]]),{j,Length[sections[[i]]]
 
 (*Distribute the helper once so parallel calls do not re-serialize the context*)
 DistributeDefinitions[GetPointsOnCYToric];
+ParallelEvaluate[
+  Off[ParallelDo::subpar, ParallelTable::subpar, 
+      ParallelMap::subpar, ParallelCombine::subpar, ParallelSum::subpar]
+];
 
 {pointsOnCY,numEqnsInPn}=GetPointsOnCYToric[dimCY,CYeqn,vars,sections,patchMasks,sectionCoords,sectionMonoms,GLSMcharges,precision];
 
