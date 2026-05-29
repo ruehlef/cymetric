@@ -19,6 +19,7 @@ mcy_logger = logging.getLogger('mathematica')
 
 # Import shared components
 from ..pointgen.pointgen_mathematica import PointGeneratorMathematica, ToricPointGeneratorMathematica
+from ..pointgen.pointgen_mc import CICYPointGeneratorMC, ToricCICYPointGeneratorMC
 from ..pointgen.nphelper import prepare_dataset, prepare_basis_pickle
 
 # Use the unified framework system
@@ -342,7 +343,74 @@ def generate_points_toric(my_args):
     mcy_logger.info("Computing derivatives of J_FS, Omega, ...")
     prepare_basis_pickle(point_gen, args['Dir'], kappa)
     mcy_logger.debug("done")
-    
+
+
+def generate_points_mc(my_args):
+    global mcy_logger
+    args = to_numpy_arrays(my_args)
+    mcy_logger.setLevel(args['logger_level'])
+    mcy_logger.debug("Using output directory {}".format(os.path.abspath(args['Dir'])))
+
+    # print ambient space
+    amb_str = ""
+    for d in args['ambient_dims']:
+        amb_str += "P^{} x ".format(d)
+    amb_str = amb_str[:-2]
+    mcy_logger.debug("Ambient space: {}".format(amb_str))
+    mcy_logger.debug("Kahler moduli: {}".format(args['KahlerModuli']))
+
+    args_str = re.sub('\],\n', '], ', str(args))
+    args_str = re.sub(' +', ' ', str(args_str))
+    mcy_logger.debug(args_str)
+
+    # need to specify monomials and their coefficients
+    if args['monomials'] == [] or args['coeffs'] == []:
+        raise ValueError("You need to specify both the monomials and their coefficients")
+
+    args['monomials'] = [x.astype(int) for x in args['monomials']]
+    args['coeffs'] = [x.astype(complex) for x in args['coeffs']]
+
+    point_gen = CICYPointGeneratorMC(args['monomials'], args['coeffs'], args['KahlerModuli'], args['ambient_dims'])
+
+    # save point generator to pickle
+    mcy_logger.info("Saving point generator to {:}".format(os.path.join(os.path.abspath(args['Dir']), "point_gen.pickle")))
+    with open(os.path.join(os.path.abspath(args['Dir']), "point_gen.pickle"), 'wb') as hnd:
+        pickle.dump(point_gen, hnd)
+
+    kappa = prepare_dataset(point_gen, args['num_pts'], args['Dir'], normalize_to_vol_j=True, ltails=0)
+    mcy_logger.info("Computing derivatives of J_FS, Omega, ...")
+    prepare_basis_pickle(point_gen, args['Dir'], kappa)
+    mcy_logger.debug("done")
+
+
+def generate_points_mc_toric(my_args):
+    global mcy_logger
+    args = to_numpy_arrays(my_args)
+    mcy_logger.setLevel(args['logger_level'])
+    mcy_logger.debug("Using output directory {}".format(os.path.abspath(args['Dir'])))
+
+    args_str = re.sub('\], \n', '], ', str(args))
+    args_str = re.sub(' +', ' ', str(args_str))
+    mcy_logger.debug(args_str)
+
+    with open(os.path.join(args['Dir'], 'toric_data.pickle'), 'rb') as f:
+        toric_data = pickle.load(f)
+    for key in toric_data:
+        mcy_logger.debug(key)
+        mcy_logger.debug(toric_data[key])
+
+    point_gen = ToricCICYPointGeneratorMC(toric_data, args['KahlerModuli'])
+
+    # save point generator to pickle
+    mcy_logger.info("Saving point generator to {:}".format(os.path.join(os.path.abspath(args['Dir']), "point_gen.pickle")))
+    with open(os.path.join(os.path.abspath(args['Dir']), "point_gen.pickle"), 'wb') as hnd:
+        pickle.dump(point_gen, hnd)
+
+    kappa = prepare_dataset(point_gen, args['num_pts'], args['Dir'], normalize_to_vol_j=True, ltails=0)
+    mcy_logger.info("Computing derivatives of J_FS, Omega, ...")
+    prepare_basis_pickle(point_gen, args['Dir'], kappa)
+    mcy_logger.debug("done")
+
 
 def train_NN(my_args):
     global mcy_logger
