@@ -102,10 +102,10 @@ def prepare_dataset(point_gen, n_p, dirname, val_split=0.1, ltails=0, rtails=0, 
     if not os.path.exists(dirname):
         os.makedirs(dirname)
     new_np = int(round(n_p/(1-ltails-rtails)))
-    pwo = point_gen.generate_point_weights(new_np, omega=True)
+    pwo = point_gen.generate_point_weights(new_np, omega=True, normalize_to_vol_j=normalize_to_vol_j)
     if len(pwo) < new_np:
         new_np = int((new_np-len(pwo))/len(pwo)*new_np + 100)
-        pwo2 = point_gen.generate_point_weights(new_np, omega=True)
+        pwo2 = point_gen.generate_point_weights(new_np, omega=True, normalize_to_vol_j=normalize_to_vol_j)
         pwo = np.concatenate([pwo, pwo2], axis=0)
     new_np = len(pwo)
     sorted_weights = np.sort(pwo['weight'])
@@ -120,14 +120,6 @@ def prepare_dataset(point_gen, n_p, dirname, val_split=0.1, ltails=0, rtails=0, 
     new_np = len(weights)
     t_i = int((1-val_split)*new_np)
     points = pwo['point'][mask]
-
-    if normalize_to_vol_j:
-        pbs = point_gen.pullbacks(points)
-        fs_ref = point_gen.fubini_study_metrics(points, vol_js=np.ones_like(point_gen.kmoduli))
-        fs_ref_pb = np.einsum('xai,xij,xbj->xab', pbs, fs_ref, np.conj(pbs))
-        aux_weights = omega.flatten() / weights.flatten()
-        norm_fac = point_gen.vol_j_norm / np.mean(np.real(np.linalg.det(fs_ref_pb)) / aux_weights)
-        weights = norm_fac * weights
 
     X_train = np.concatenate((points[:t_i].real, points[:t_i].imag), axis=-1)
     y_train = np.concatenate((weights[:t_i], omega[:t_i]), axis=1)
