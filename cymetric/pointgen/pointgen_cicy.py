@@ -606,12 +606,6 @@ class CICYPointGenerator(PointGenerator):
         keyword arguments can be any from 
         :py:func:`cymetric.pointgen.nphelper.prepare_dataset`.
 
-        NOTE:
-            By default we remove 0.05 of the points with vanishing 
-            weights. In our experience the numerics can become quite messy
-            at these points. Furthermore, they don't contribute much to the MC
-            integration and can thus more or less safely be removed.
-
         Args:
             n_p (int): Number of points to generate.
             dirname (str): Directory name to save dataset in.

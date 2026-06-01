@@ -23,7 +23,7 @@ Point-generation recipe
 1. Find an initial feasible point by Newton-projecting a random ambient-space
    point onto the constraint surface.
 2. Run a short pilot chain to auto-tune the step size (targeting
-   ``target_rate`` acceptance, default 30 %) and estimate the integrated
+   ``target_rate`` acceptance, default 65 %) and estimate the integrated
    autocorrelation time (IAC) for the thinning factor.
 3. Burn-in and then collect one sample every ``thin`` steps.
 
@@ -53,7 +53,10 @@ Auto-tuning heuristics
 ----------------------
 * **Step size**: a short pilot chain is run for ``n_rounds`` rounds of
   ``n_pilot`` steps each; after each round the step size is scaled by
-  ``observed_rate / target_rate`` and clamped to ``[1e-6, 1e3]``.
+  ``observed_rate / target_rate`` and clamped to ``[1e-6, max_step_size]``
+  (default ``max_step_size = 2.0``).  A high ``target_rate`` (default 0.65)
+  keeps ``step_size`` small so the tangent-space proposal remains
+  approximately symmetric after Newton projection.
 * **Thinning**: the integrated autocorrelation time of :math:`|z|^2` is
   estimated from a pilot chain using Geyer's initial positive-sequence
   estimator (FFT-accelerated), and ``thin = ceil(IAC)`` is returned.
@@ -416,28 +419,40 @@ class CICYPointGeneratorMC(CICYPointGenerator):
     # Auto-tuning helpers
     # ------------------------------------------------------------------
 
-    def _tune_step_size(self, z0, rng, n_pilot=300, target_rate=0.3,
-                        n_rounds=6):
+    def _tune_step_size(self, z0, rng, n_pilot=1000, target_rate=0.65,
+                        n_rounds=6, max_step_size=2.0):
         r"""Adapt ``step_size`` via a pilot chain to approach
         ``target_rate`` acceptance.
 
         Runs ``n_rounds`` rounds of ``n_pilot`` steps each; after each
         round the step size is scaled by
         :math:`\text{observed\_rate} / \text{target\_rate}` and clamped
-        to :math:`[10^{-6},\, 10^3]`.
+        to :math:`[10^{-6},\, \text{max\_step\_size}]`.
 
         The initial step size is 10 % of the average absolute coordinate
         magnitude, which is a reasonable starting point for normalised
         projective coordinates.
 
+        A high ``target_rate`` (default 0.65) keeps ``step_size`` small so
+        that the tangent-space proposal remains approximately symmetric
+        (stays near the tangent plane after Newton projection), which is
+        required for the Metropolis acceptance ratio
+        :math:`|\Omega'|^2/|\Omega|^2` to give the correct stationary
+        distribution.  Targeting 30 % acceptance drives the step size into
+        a regime where the proposal is heavily asymmetric and the chain's
+        stationary distribution is biased.
+
         Args:
             z0 (ndarray): starting point.
             rng (np.random.Generator): random number generator.
-            n_pilot (int, optional): steps per tuning round. Defaults to 300.
+            n_pilot (int, optional): steps per tuning round. Defaults to
+                1000 (large enough to average over ~10 autocorrelation times).
             target_rate (float, optional): target acceptance rate.
-                Defaults to 0.3.
+                Defaults to 0.65.
             n_rounds (int, optional): number of tuning rounds.
                 Defaults to 6.
+            max_step_size (float, optional): hard upper bound on the tuned
+                step size. Defaults to 2.0.
 
         Returns:
             tuple(float, ndarray):
@@ -456,7 +471,7 @@ class CICYPointGeneratorMC(CICYPointGenerator):
                 step_size *= 0.1
             else:
                 step_size *= rate / target_rate
-            step_size = float(np.clip(step_size, 1e-6, 1e3))
+            step_size = float(np.clip(step_size, 1e-6, max_step_size))
         logger.debug(
             "Step-size tuning: acceptance rate = {:.3f}, "
             "step_size = {:.4g}".format(rate, step_size))
@@ -547,7 +562,7 @@ class CICYPointGeneratorMC(CICYPointGenerator):
     # ------------------------------------------------------------------
 
     def generate_points(self, n_p, step_size=None, burn_in=None, thin=None,
-                        seed=None, target_rate=0.3, **kwargs):
+                        seed=None, target_rate=0.65, **kwargs):
         r"""Generate ``n_p`` points on the CY using MCMC.
 
         If ``step_size``, ``burn_in``, or ``thin`` are not supplied here
@@ -567,7 +582,8 @@ class CICYPointGeneratorMC(CICYPointGenerator):
                 step after burn-in).
             seed (int, optional): RNG seed; overrides the constructor seed.
             target_rate (float, optional): target acceptance rate for
-                auto-tuning. Defaults to 0.3.
+                auto-tuning. Defaults to 0.65 (keeps step_size small for
+                approximately symmetric proposals).
             **kwargs: ignored (for API compatibility).
 
         Returns:
@@ -692,7 +708,13 @@ class CICYPointGeneratorMC(CICYPointGenerator):
         # Compute Omega once; re-use for both normalisation and output.
         omegas_hol = self.holomorphic_volume_form(points)
 
-        # Uniform weights: MCMC samples exactly from |Omega|^2.
+        # Uniform weights: MCMC samples exactly from |Omega|^2, so every
+        # point already carries the correct CY-measure weight.  Using the
+        # FS weight |Omega|^2/det(g) here would be wrong: it is the right
+        # weight only for points drawn from the *FS* measure.  With MC
+        # density p(x) propto |Omega|^2 we have
+        #   E_MC[det(g)/|Omega|^2] = int det(g) dmu_FS / V_CY = V_K/V_CY,
+        # so uniform weights in compute_kappa yield the correct kappa.
         weights = np.ones(n_p, dtype=np.float64)
 
         if normalize_to_vol_j:
@@ -704,7 +726,7 @@ class CICYPointGeneratorMC(CICYPointGenerator):
                 'xai,xij,xbj->xab', pbs, fs_ref, np.conj(pbs))
             # For MCMC sampling proportional to |Omega|^2:
             #   E_{MC}[det(g_pb)/|Omega|^2] ~ integral(det(g_pb) dA) / Z
-            # so norm_fac * E_{MC}[det(g_pb)] = vol_j_norm.
+            # so norm_fac * E_{MC}[det(g_pb)/|Omega|^2] = vol_j_norm.
             norm_fac = self.vol_j_norm / np.mean(
                 np.real(np.linalg.det(fs_ref_pb)) / omega_sq)
             weights = norm_fac * np.ones(n_p, dtype=np.float64)
