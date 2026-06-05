@@ -13,7 +13,13 @@ import scipy.optimize as opt
 from joblib import Parallel, delayed
 from cymetric.pointgen.pointgen import PointGenerator, tqdm
 from cymetric.pointgen.nphelper import generate_monomials, prepare_dataset, get_levicivita_tensor
+import warnings
 
+warnings.filterwarnings(
+    "ignore",
+    message="The iteration is not making good progress.*",
+    category=RuntimeWarning,
+)
 logging.basicConfig(format='%(name)s:%(levelname)s:%(message)s')
 logger = logging.getLogger('CICYpointgen')
 

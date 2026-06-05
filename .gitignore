@@ -181,3 +181,6 @@ cython_debug/
 .cursorindexingignore
 cymetric/models/.DS_Store
 cymetric/pointgen/.DS_Store
+cymetric/wolfram/.DS_Store
+notebooks/.DS_Store
+notebooks/.DS_Store
