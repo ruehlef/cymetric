@@ -199,7 +199,7 @@ class FreeModel(FSModel):
     # Combined loss (used internally by train_step / compute_loss)
     # ------------------------------------------------------------------
 
-    def compute_loss(self, x, y, sample_weight=None):
+    def compute_loss(self, x, y, sample_weight=None, pb=None):
         r"""Computes the full combined loss for a batch.
 
         Equivalent to the body of FreeModel.train_step in TF.
@@ -208,11 +208,13 @@ class FreeModel(FSModel):
             x (jnp.ndarray, [bSize, 2*ncoords], float32): Points.
             y (jnp.ndarray, [bSize, ≥2], float32): Labels.
             sample_weight (jnp.ndarray, [bSize], float32, optional).
+            pb (jnp.ndarray, optional): Precomputed pullbacks for x. If None
+                they are computed from the points. Defaults to None.
 
         Returns:
             jnp.ndarray, [bSize], float32: per-sample loss.
         """
-        y_pred = self(x)
+        y_pred = self(x, pb=pb)
 
         cijk_loss = (self.compute_kaehler_loss(x)
                      if self.learn_kaehler
@@ -349,7 +351,7 @@ class PhiFSModel(FreeModel):
         # Phi model is automatically Kähler
         self.learn_kaehler = False
 
-    def __call__(self, input_tensor, training=True, j_elim=None):
+    def __call__(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""g_out_ij = g_FS_ij + partial_i bar_partial_j phi_NN.
 
         Equivalent to PhiFSModel.call in TF.
@@ -379,7 +381,7 @@ class PhiFSModel(FreeModel):
         dd_phi_c = (dx_dx_phi + dy_dy_phi
                     + 1j * (dx_dy_phi - dy_dx_phi)).astype(jnp.complex64)
 
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi_pb = jnp.einsum('xai,xij,xbj->xab', pbs, dd_phi_c, jnp.conj(pbs))
 
         fs_cont = self.fubini_study_pb(input_tensor, pb=pbs, j_elim=j_elim)
@@ -713,7 +715,7 @@ class PhiFSModelToric(ToricModel):
         super(PhiFSModelToric, self).__init__(*args, **kwargs)
         self.learn_kaehler = False
 
-    def __call__(self, input_tensor, training=True, j_elim=None):
+    def __call__(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""g_out_ij = g_FS'_ij + partial_i bar_partial_j phi_NN.
 
         Equivalent to PhiFSModelToric.call in TF.
@@ -738,7 +740,7 @@ class PhiFSModelToric(ToricModel):
         dd_phi_c = (dx_dx_phi + dy_dy_phi
                     + 1j * (dx_dy_phi - dy_dx_phi)).astype(jnp.complex64)
 
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi_pb = jnp.einsum('xai,xij,xbj->xab', pbs, dd_phi_c, jnp.conj(pbs))
 
         fs_cont = self.fubini_study_pb(input_tensor, pb=pbs, j_elim=j_elim)

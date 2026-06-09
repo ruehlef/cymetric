@@ -174,19 +174,22 @@ class FreeModel(FSModel):
         
         return out + low + torch.transpose(torch.conj(low), -2, -1)
 
-    def compute_loss(self, x, y, sample_weight=None):
+    def compute_loss(self, x, y, sample_weight=None, pb=None):
         r"""Computes the total loss for training.
 
         Args:
             x (torch.tensor): Input points
             y (torch.tensor): Target data (weights and omega values)
             sample_weight (torch.tensor, optional): Sample weights
+            pb (torch.tensor, optional): Precomputed pullbacks for x, passed
+                through to the metric prediction. If None they are computed
+                from the points. Defaults to None.
 
         Returns:
             torch.tensor: Total loss
         """
         # Get predictions
-        y_pred = self(x, training=True)
+        y_pred = self(x, training=True, pb=pb)
         
         total_loss = 0.0
         
@@ -474,7 +477,7 @@ class PhiFSModel(FreeModel):
         # automatic in Phi network
         self.learn_kaehler = False
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math::
@@ -488,6 +491,9 @@ class PhiFSModel(FreeModel):
             j_elim (torch.tensor([bSize, nHyper], int64), optional):
                 Coordinates(s) to be eliminated in the pullbacks.
                 If None will take max(dQ/dz). Defaults to None.
+            pb (torch.tensor([bSize, nfold, ncoords], complex64), optional):
+                Precomputed pullbacks. If None will compute them from the
+                points. Defaults to None.
 
         Returns:
             torch.tensor([bSize, nfold, nfold], complex64):
@@ -536,7 +542,7 @@ class PhiFSModel(FreeModel):
         dd_phi = torch.complex(dx_dx_phi + dy_dy_phi, dx_dy_phi - dy_dx_phi)
         
         # Apply pullbacks
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi = torch.einsum('xai,xij,xbj->xab', pbs, dd_phi, torch.conj(pbs))
 
         # Get Fubini-Study metric

@@ -62,11 +62,11 @@ def _make_train_step(optimizer):
     """
 
     @eqx.filter_jit
-    def train_step(model, opt_state, x, y, sample_weight=None):
+    def train_step(model, opt_state, x, y, sample_weight=None, pb=None):
         def loss_fn(nn_model):
             # Reconstruct the full model with the candidate NN
             full_model = eqx.tree_at(lambda m: m.model, model, nn_model)
-            total_loss, loss_dict = full_model.compute_loss(x, y, sample_weight)
+            total_loss, loss_dict = full_model.compute_loss(x, y, sample_weight, pb=pb)
             return jnp.mean(total_loss), loss_dict
 
         (mean_loss, loss_dict), grads = eqx.filter_value_and_grad(
@@ -130,6 +130,9 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
     X_train = jnp.array(data['X_train'], dtype=jnp.float32)
     y_train = jnp.array(data['y_train'], dtype=jnp.float32)
 
+    # pullbacks are independent of the network weights, so compute them once
+    train_pullbacks = fsmodel.pullbacks(X_train)
+
     sample_weights = y_train[:, -2] if sw else None
 
     if optimizer is None:
@@ -184,7 +187,7 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
             bx, by = X_train[idx], y_train[idx]
             bsw = sample_weights[idx] if sample_weights is not None else None
             fsmodel, opt_state, loss_val, loss_components = train_step(
-                fsmodel, opt_state, bx, by, bsw)
+                fsmodel, opt_state, bx, by, bsw, train_pullbacks[idx])
             epoch_loss1 += loss_val
             num_batches1 += 1
             # Update custom metrics
@@ -222,7 +225,7 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
             bx, by = X_train[idx], y_train[idx]
             bsw = sample_weights[idx] if sample_weights is not None else None
             fsmodel, opt_state, loss_val, loss_components = train_step(
-                fsmodel, opt_state, bx, by, bsw)
+                fsmodel, opt_state, bx, by, bsw, train_pullbacks[idx])
             epoch_loss2 += loss_val
             num_batches2 += 1
             if custom_metrics:
