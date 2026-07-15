@@ -161,6 +161,10 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
     hist1, hist2 = {}, {}
     n_train = len(X_train)
 
+    # Build the JIT step once, outside the loop; rebuilding it each epoch made
+    # XLA recompile and retain executables per epoch, leaking memory on long runs.
+    train_step = _make_train_step(optimizer)
+
     for epoch in range(epochs):
         if verbose > 0:
             print('\nEpoch {:2d}/{:d}'.format(epoch + 1, epochs))
@@ -173,7 +177,6 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
         fsmodel = eqx.tree_at(lambda m: m.learn_volk,      fsmodel, False)
 
         batch_size1 = batch_sizes[0]
-        train_step = _make_train_step(optimizer)
         epoch_loss1 = 0.
         num_batches1 = 0
         indices = np.random.permutation(n_train)
