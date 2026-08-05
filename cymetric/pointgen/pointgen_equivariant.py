@@ -74,13 +74,43 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
         check_invariance (bool): verify on generated points that the group
             really preserves the hypersurface. Cheap, and catches the common
             error of a non-invariant defining polynomial.
+        measure (str): ``'cover'`` or ``'quotient'``. See below -- this is the
+            one thing about this class that is easy to get wrong.
         All other arguments as in :class:`CICYPointGenerator`.
+
+    Which space the weights integrate over
+    --------------------------------------
+    The augmented sample is a sample of **X**, not of X/Gamma: every orbit
+    appears in full, and the weights are normalised so that summing them
+    reproduces the volume of the cover. That is the right thing for training,
+    where the aim is a Gamma-invariant metric on X and every orbit member is a
+    legitimate data point.
+
+    It is the wrong thing for an integral. For a Gamma-invariant integrand,
+
+        int_{X/Gamma} f  =  (1/|Gamma|) int_X f ,
+
+    so anything computed against these weights is ``|Gamma|`` times the
+    quotient answer. Volumes, Euler characteristics from Chern-Gauss-Bonnet,
+    and normalisation constants all inherit that factor, and nothing
+    downstream knows to remove it.
+
+    ``measure='quotient'`` divides the weights by ``|Gamma|`` once more, so
+    that sums over the returned array are integrals over X/Gamma directly. The
+    default is ``'cover'`` because it matches the stock generator and so
+    cannot silently change the meaning of existing code; ``gamma_order`` and
+    ``vol_quotient`` are exposed either way so the factor can be applied by
+    hand.
     """
 
     def __init__(self, *args, **kwargs):
         self.group_matrices = [np.asarray(g, dtype=np.complex128)
                                for g in kwargs.pop('group_matrices', [])]
         self.check_invariance = kwargs.pop('check_invariance', True)
+        self.measure = kwargs.pop('measure', 'cover')
+        if self.measure not in ('cover', 'quotient'):
+            raise ValueError(
+                "measure must be 'cover' or 'quotient', got %r" % (self.measure,))
         super(EquivariantCICYPointGenerator, self).__init__(*args, **kwargs)
 
         if not self.group_matrices:
@@ -100,6 +130,7 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
                 'the identity is not among the group matrices, so this is not '
                 'a group')
         self._check_closure()
+        self.gamma_order = len(self.group_matrices)
 
     def _check_closure(self):
         """Products of group elements must be group elements, up to a scalar.
@@ -123,6 +154,11 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
         if abs(b[idx]) < tol:
             return False
         return bool(np.allclose(a, b * (a[idx] / b[idx]), atol=tol))
+
+    @property
+    def vol_quotient(self):
+        """The volume of X/Gamma, i.e. the cover's volume over the group order."""
+        return self.get_volume_from_intersections(self.kmoduli) / self.gamma_order
 
     # -- the group action on points ---------------------------------------
 
@@ -209,9 +245,12 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
 
         out = np.zeros(len(pts), dtype=base.dtype)
         out['point'] = pts
+        divisor = self.gamma_order
+        if self.measure == 'quotient':
+            # once for the orbit augmentation, once more to descend
+            divisor = divisor * self.gamma_order
         out['weight'] = self.point_weight(
-            pts, normalize_to_vol_j=normalize_to_vol_j) / len(
-                self.group_matrices)
+            pts, normalize_to_vol_j=normalize_to_vol_j) / divisor
         if omega:
             out['omega'] = self.holomorphic_volume_form(pts)
         return out
