@@ -67,9 +67,16 @@ def _make_train_step(optimizer):
             # Reconstruct the full model with the candidate NN
             full_model = eqx.tree_at(lambda m: m.model, model, nn_model)
             total_loss, loss_dict = full_model.compute_loss(x, y, sample_weight)
-            return jnp.mean(total_loss), loss_dict
+            # Sum (not mean) over the batch for the gradient target: TF's
+            # tape.gradient(total_loss, ...) on a non-scalar [bSize] target
+            # implicitly uses output_gradients=ones_like(total_loss), i.e. it
+            # differentiates sum(total_loss). Matching that here keeps the
+            # raw gradient magnitude (and hence gclipping's effect) the same
+            # scale as TF; using mean() shrinks gradients by batch_size and
+            # makes gclipping's global-norm clip rarely engage.
+            return jnp.sum(total_loss), (jnp.mean(total_loss), loss_dict)
 
-        (mean_loss, loss_dict), grads = eqx.filter_value_and_grad(
+        (_, (mean_loss, loss_dict)), grads = eqx.filter_value_and_grad(
             loss_fn, has_aux=True)(model.model)
 
         # Replace NaNs with small gradient (matches TF: tf.where(is_nan, 1e-8, g))
