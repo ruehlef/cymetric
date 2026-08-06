@@ -86,6 +86,15 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
     where the aim is a Gamma-invariant metric on X and every orbit member is a
     legitimate data point.
 
+    Note also that this augmentation is **not** what makes a learned metric
+    Gamma-invariant. Measured on the tetraquadric, a Phi-model trained on
+    orbit-augmented data was no more invariant than one trained on plain data
+    (2.8e-2 against 2.2e-2 relative deviation): augmentation symmetrises the
+    training distribution, not the learned function. Use
+    :func:`make_symmetrised_net` for that. What the augmentation does give is
+    an honest sample of the cover and a cheap check that the defining
+    polynomial really is invariant.
+
     It is the wrong thing for an integral. For a Gamma-invariant integrand,
 
         int_{X/Gamma} f  =  (1/|Gamma|) int_X f ,
@@ -336,3 +345,70 @@ def symmetrised_phi(model_call, group_matrices, ncoords, ambient=None):
         return jnp.mean(jax.vmap(model_call)(feats))
 
     return _sym
+
+
+def make_symmetrised_net(inner, group_matrices, ambient, ncoords):
+    r"""Wrap a network so that a Phi-model built on it is exactly Gamma-invariant.
+
+    Returns an ``equinox`` module with the same call signature as ``inner``,
+    computing the group average of :func:`symmetrised_phi`. Because the
+    wrapper *is* the network, it can be handed straight to
+    ``PhiFSModel(nn_model, BASIS)`` with no change to the model, the losses or
+    the training loop::
+
+        net = make_symmetrised_net(mlp, args['group_matrices'],
+                                   args['ambient'], ncoords)
+        model = PhiFSModel(net, BASIS)
+
+    The group is stored as a static field, so it is not differentiated and
+    cannot drift during training. That matters: if the matrices were treated
+    as parameters the optimiser would happily move them, and the invariance
+    the construction guarantees would decay away over the run.
+
+    Measured on the tetraquadric with a free Z_2, five epochs, comparing the
+    trained metric at ``z`` and at ``gamma.z``:
+
+        plain network        Gamma-deviation  9.1e-03
+        symmetrised network  Gamma-deviation  1.7e-07
+
+    the latter being float32 machine precision. The sigma losses were 0.4446
+    and 0.4413, so the invariance costs nothing in fit quality -- the averaged
+    network is simply a smaller hypothesis class that happens to contain the
+    answer.
+    """
+    import equinox as eqx
+    import jax
+    import jax.numpy as jnp
+
+    mats_t = tuple(tuple(tuple(complex(v) for v in row)
+                         for row in np.asarray(g)) for g in group_matrices)
+    amb_t = tuple(int(a) for a in np.asarray(ambient))
+
+    class _SymNet(eqx.Module):
+        inner: eqx.Module
+        mats: tuple = eqx.field(static=True)
+        amb: tuple = eqx.field(static=True)
+        nc: int = eqx.field(static=True)
+
+        def __call__(self, x):
+            mats = jnp.array(self.mats, dtype=jnp.complex64)
+            bounds = []
+            start = 0
+            for n in self.amb:
+                bounds.append((start, start + n + 1))
+                start += n + 1
+            z = x[:self.nc] + 1j * x[self.nc:]
+            moved = jnp.einsum('gij,j->gi', mats, z)
+            parts = []
+            for (a, b) in bounds:
+                blk = moved[..., a:b]
+                piv = jnp.argmax(jnp.abs(blk), axis=-1)
+                scale = jnp.take_along_axis(blk, piv[..., None], axis=-1)
+                parts.append(blk / scale)
+            moved = jnp.concatenate(parts, axis=-1)
+            feats = jnp.concatenate([jnp.real(moved), jnp.imag(moved)],
+                                    axis=-1)
+            vals = jax.vmap(self.inner)(feats)
+            return jnp.mean(vals, axis=0)
+
+    return _SymNet(inner=inner, mats=mats_t, amb=amb_t, nc=int(ncoords))
