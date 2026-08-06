@@ -345,9 +345,53 @@ class PhiFSModel(FreeModel):
     """
 
     def __init__(self, *args, **kwargs):
+        check_curvature = kwargs.pop('check_curvature', True)
         super(PhiFSModel, self).__init__(*args, **kwargs)
         # Phi model is automatically Kähler
         self.learn_kaehler = False
+        if check_curvature:
+            self._warn_if_phi_is_harmonic()
+
+    def _warn_if_phi_is_harmonic(self):
+        r"""Warn when the network has an identically vanishing Hessian.
+
+        This model adds ``partial_i bar_partial_j phi_NN`` to the Fubini-Study
+        metric, so it depends on the *second* derivatives of the network. A
+        piecewise-linear activation has a second derivative that vanishes
+        almost everywhere, and ``equinox.nn.MLP`` uses ``jax.nn.relu`` by
+        default. With that default the correction is identically zero and the
+        model returns pure Fubini-Study for ever.
+
+        Nothing else notices. The parameters still move, the losses still go
+        down, and the training log is indistinguishable from a run that is
+        working -- only the metric never changes. So this is checked once at
+        construction, on a random input, and reported loudly.
+
+        Pass ``check_curvature=False`` to skip it.
+        """
+        import warnings
+
+        try:
+            key = jax.random.PRNGKey(0)
+            x = jax.random.normal(key, (2 * self.ncoords,))
+
+            def _phi(v):
+                return self.model(v)[0]
+
+            hess = jax.jacobian(jax.grad(_phi))(x)
+            scale = float(jnp.max(jnp.abs(hess)))
+        except Exception:  # pragma: no cover - never block construction
+            return
+        if scale < 1e-12:
+            warnings.warn(
+                'the network passed to PhiFSModel has an identically zero '
+                'second derivative, so g = g_FS + dd-bar phi will never differ '
+                'from the Fubini-Study metric no matter how long you train. '
+                'The usual cause is a piecewise-linear activation: '
+                'equinox.nn.MLP defaults to jax.nn.relu, whose second '
+                'derivative vanishes almost everywhere. Use a smooth '
+                'activation such as jax.nn.gelu or jnp.tanh.',
+                RuntimeWarning, stacklevel=3)
 
     def __call__(self, input_tensor, training=True, j_elim=None):
         r"""g_out_ij = g_FS_ij + partial_i bar_partial_j phi_NN.
