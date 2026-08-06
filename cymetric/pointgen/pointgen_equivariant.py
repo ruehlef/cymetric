@@ -15,44 +15,66 @@ the Calabi-Yau metric is unique in its Kahler class, and a Gamma-invariant
 Kahler class therefore has a Gamma-invariant metric. So the quotient metric can
 be learned on X provided the training data is Gamma-symmetric. That is what
 this generator produces: every sampled point is accompanied by its whole
-Gamma-orbit, so any model fit to the data sees a symmetric problem and the
-learned metric descends.
+Gamma-orbit, so any model fit to the data sees a symmetric problem.
 
-This is data augmentation rather than a change to the geometry, which is
-deliberate: it needs no modification to the models, the losses, or the
-integration weights, and it degrades gracefully -- with the trivial group it
-is exactly the stock generator.
+Normalisation and volumes
+-------------------------
+Monte Carlo integrals in this package are means, not sums, and
+``normalize_to_vol_j`` already fixes the weights so that they integrate to
+``int_X J^3``. Replicating each point over its orbit therefore changes
+nothing: the mean of the augmented weights equals the mean of the base
+weights, so the volume of X comes out the same as from the stock generator.
+No rescaling is applied here and none is needed.
 
-Conditions on Gamma
--------------------
-Three, and none implies the others. They are checked at construction, because
-a metric computed when any of them fails is a metric on the wrong space:
+The volume of the quotient is simply
 
-1. *Gamma preserves the holomorphic form*, i.e. sits in SU(3) and not merely
-   U(3). Otherwise Omega does not descend, the quotient has no covariantly
-   constant spinor, and it is not Calabi-Yau at all.
-2. *Gamma acts freely*, so the quotient is smooth. Not checked here -- it is a
-   property of the particular defining polynomial, and the caller is expected
-   to have established it. ``pyCICY.equivariant`` diagnoses it on the degrees.
-3. *Gamma preserves X and the Kahler class.* Invariance of X is checked
-   numerically on the generated points, which is cheap and catches the common
-   error of taking a random polynomial rather than a Gamma-invariant one.
+    Vol(X/Gamma) = Vol(X) / |Gamma| ,
 
-Usage
------
-The group is supplied as explicit matrices on the homogeneous coordinates, so
-this file needs to know nothing about configuration matrices or characters::
+which the caller applies if that is what they want. It is documented rather
+than baked into the weights, because the sample really is a sample of the
+cover.
 
-    from pyCICY import export
-    args = export.to_cymetric(conf, action=A, kmoduli='stability',
-                              summands=model, include_group=True)
-    pg = EquivariantCICYPointGenerator(**args)
+Augmentation is for training, not for integration
+-------------------------------------------------
+Requesting ``n`` points gives ``n`` points, of which only ``n / |Gamma|`` are
+independent -- the rest are symmetry images. For fitting a model that is the
+intent: the network sees a symmetric problem. For a Monte Carlo integral it is
+waste, and worse, it is misleading: an error bar computed from ``n`` samples
+overestimates the accuracy by a factor of ``sqrt(|Gamma|)``, because the
+effective sample size is ``n / |Gamma|``.
 
-``pyCICY.export.group_matrices`` produces the matrices; anything that can move
-a point will do.
+If you want an integral, either use the stock generator, or take one
+representative per orbit -- ``orbit_index`` in the returned structure says
+which points are images of which, so the independent subset is
+``orbit_index == 0``. The same field lets you split train and validation
+without leakage: putting a point in one and its image in the other is not a
+split at all, and this generator cannot prevent that on your behalf, so it
+gives you what you need to do it yourself.
+
+Conditions on Gamma, and what is checked
+----------------------------------------
+Three conditions must hold for X/Gamma to be a Calabi-Yau that a model can live
+on, and none implies the others:
+
+1. *Gamma preserves the holomorphic form* -- it sits in SU(3), not merely
+   U(3). Otherwise Omega does not descend and the quotient is not Calabi-Yau.
+   **Checked**, numerically: Omega picks up ``det(g)`` from the ambient volume
+   form and the inverse of each defining polynomial's character, both of which
+   are measurable on sampled points.
+2. *Gamma preserves X* -- each defining polynomial is an eigenvector.
+   **Checked** on generated points.
+3. *The Kahler class is Gamma-invariant.* If the group permutes ambient
+   factors, the corresponding Kahler parameters must agree, or the class does
+   not descend. **Checked** against ``kmoduli``.
+
+*Freeness* is **not** checked and cannot be, from the data available here: it
+is a property of the particular defining polynomial, not of the degrees or the
+matrices. If Gamma has fixed points on X then the quotient is singular, this
+class will not notice, and the result is a metric on something that is not a
+manifold. Establish freeness beforehand.
 
 :Authors:
-    Written for the pyCICY-X / cymetric bridge.
+    Contributed for the pyCICY-X / cymetric bridge.
 """
 
 import logging
@@ -70,56 +92,22 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
     Args:
         group_matrices (list(ndarray[(ncoords, ncoords)], complex)): the group
             acting on the homogeneous coordinates. Must contain the identity
-            and be closed under multiplication; both are checked.
+            and be closed under multiplication up to a scalar on each ambient
+            factor; both are checked.
         check_invariance (bool): verify on generated points that the group
-            really preserves the hypersurface. Cheap, and catches the common
-            error of a non-invariant defining polynomial.
-        measure (str): ``'cover'`` or ``'quotient'``. See below -- this is the
-            one thing about this class that is easy to get wrong.
+            preserves the hypersurface and the holomorphic form. Cheap, and
+            catches the common error of a defining polynomial that is not
+            Gamma-invariant.
         All other arguments as in :class:`CICYPointGenerator`.
 
-    Which space the weights integrate over
-    --------------------------------------
-    The augmented sample is a sample of **X**, not of X/Gamma: every orbit
-    appears in full, and the weights are normalised so that summing them
-    reproduces the volume of the cover. That is the right thing for training,
-    where the aim is a Gamma-invariant metric on X and every orbit member is a
-    legitimate data point.
-
-    Note also that this augmentation is **not** what makes a learned metric
-    Gamma-invariant. Measured on the tetraquadric, a Phi-model trained on
-    orbit-augmented data was no more invariant than one trained on plain data
-    (2.8e-2 against 2.2e-2 relative deviation): augmentation symmetrises the
-    training distribution, not the learned function. Use
-    :func:`make_symmetrised_net` for that. What the augmentation does give is
-    an honest sample of the cover and a cheap check that the defining
-    polynomial really is invariant.
-
-    It is the wrong thing for an integral. For a Gamma-invariant integrand,
-
-        int_{X/Gamma} f  =  (1/|Gamma|) int_X f ,
-
-    so anything computed against these weights is ``|Gamma|`` times the
-    quotient answer. Volumes, Euler characteristics from Chern-Gauss-Bonnet,
-    and normalisation constants all inherit that factor, and nothing
-    downstream knows to remove it.
-
-    ``measure='quotient'`` divides the weights by ``|Gamma|`` once more, so
-    that sums over the returned array are integrals over X/Gamma directly. The
-    default is ``'cover'`` because it matches the stock generator and so
-    cannot silently change the meaning of existing code; ``gamma_order`` and
-    ``vol_quotient`` are exposed either way so the factor can be applied by
-    hand.
+    Attributes:
+        gamma_order (int): |Gamma|.
     """
 
     def __init__(self, *args, **kwargs):
         self.group_matrices = [np.asarray(g, dtype=np.complex128)
                                for g in kwargs.pop('group_matrices', [])]
         self.check_invariance = kwargs.pop('check_invariance', True)
-        self.measure = kwargs.pop('measure', 'cover')
-        if self.measure not in ('cover', 'quotient'):
-            raise ValueError(
-                "measure must be 'cover' or 'quotient', got %r" % (self.measure,))
         super(EquivariantCICYPointGenerator, self).__init__(*args, **kwargs)
 
         if not self.group_matrices:
@@ -134,40 +122,157 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
                 raise ValueError(
                     'group matrices must be %d x %d to act on the homogeneous '
                     'coordinates, got %s' % (n, n, g.shape))
-        if not any(np.allclose(g, np.eye(n)) for g in self.group_matrices):
+
+        # Sort the identity to the front, so that orbit() can promise it and a
+        # caller can rely on the first block being the independent sample.
+        ident = [i for i, g in enumerate(self.group_matrices)
+                 if np.allclose(g, np.eye(n))]
+        if not ident:
             raise ValueError(
                 'the identity is not among the group matrices, so this is not '
                 'a group')
-        self._check_closure()
+        i0 = ident[0]
+        self.group_matrices = ([self.group_matrices[i0]]
+                               + [g for i, g in enumerate(self.group_matrices)
+                                  if i != i0])
         self.gamma_order = len(self.group_matrices)
 
-    def _check_closure(self):
-        """Products of group elements must be group elements, up to a scalar.
+        self._blocks = []
+        start = 0
+        for k in self.ambient:
+            self._blocks.append((start, start + int(k) + 1))
+            start += int(k) + 1
 
-        Up to a scalar because the action is projective: rescaling the
-        homogeneous coordinates of one factor is the identity on the ambient.
-        Requiring exact equality here would reject perfectly good lifts.
+        self._check_closure()
+        self._check_kmoduli()
+
+    # -- consistency -------------------------------------------------------
+
+    def _check_closure(self):
+        """Products of group elements must be group elements.
+
+        Equality is up to a scalar **per ambient factor**, not up to a single
+        global scalar: rescaling the homogeneous coordinates of one factor is
+        the identity on that projective space and says nothing about the
+        others. Requiring one global scalar would reject perfectly good lifts
+        of a genuine group action on the ambient space.
         """
         mats = self.group_matrices
         for a in mats:
             for b in mats:
                 p = a @ b
-                if not any(self._proportional(p, c) for c in mats):
+                if not any(self._proportional_blockwise(p, c) for c in mats):
                     raise ValueError(
                         'the given matrices are not closed under '
-                        'multiplication, so they do not form a group')
+                        'multiplication (up to a scalar on each ambient '
+                        'factor), so they do not form a group action on the '
+                        'ambient space')
 
-    @staticmethod
-    def _proportional(a, b, tol=1e-8):
-        idx = np.unravel_index(np.argmax(np.abs(b)), b.shape)
-        if abs(b[idx]) < tol:
-            return False
-        return bool(np.allclose(a, b * (a[idx] / b[idx]), atol=tol))
+    def _proportional_blockwise(self, a, b, tol=1e-8):
+        """Whether ``a`` and ``b`` agree up to one scalar per ambient factor."""
+        for (s, e) in self._blocks:
+            ab, bb = a[:, s:e], b[:, s:e]
+            idx = np.unravel_index(np.argmax(np.abs(bb)), bb.shape)
+            if abs(bb[idx]) < tol:
+                if np.max(np.abs(ab)) > tol:
+                    return False
+                continue
+            if not np.allclose(ab, bb * (ab[idx] / bb[idx]), atol=tol):
+                return False
+        return True
 
-    @property
-    def vol_quotient(self):
-        """The volume of X/Gamma, i.e. the cover's volume over the group order."""
-        return self.get_volume_from_intersections(self.kmoduli) / self.gamma_order
+    def _check_kmoduli(self):
+        """A permuted ambient factor must carry the same Kahler parameter.
+
+        If ``g`` maps factor i to factor j then ``t_i`` and ``t_j`` have to
+        agree, or the Kahler class is not Gamma-invariant, does not descend to
+        the quotient, and the metric being asked for is not the one on
+        X/Gamma.
+        """
+        t = np.asarray(self.kmoduli)
+        for g in self.group_matrices:
+            perm = self._factor_permutation(g)
+            if perm is None:
+                continue
+            for i, j in enumerate(perm):
+                if abs(t[i] - t[j]) > 1e-9:
+                    raise ValueError(
+                        'a group element maps ambient factor %d to factor %d, '
+                        'but their Kahler parameters differ (%s vs %s). The '
+                        'Kahler class is then not Gamma-invariant and does '
+                        'not descend to the quotient.' % (i, j, t[i], t[j]))
+
+    def _factor_permutation(self, g, tol=1e-8):
+        """Which ambient factor each factor maps to, or None if unclear."""
+        perm = []
+        for (s, e) in self._blocks:
+            rows = np.max(np.abs(g[:, s:e]), axis=1)
+            hits = [k for k, (a, b) in enumerate(self._blocks)
+                    if np.max(rows[a:b]) > tol]
+            if len(hits) != 1:
+                return None
+            perm.append(hits[0])
+        return perm
+
+    def verify_invariance(self, points, tol=1e-6):
+        """Check that the group maps X to itself and preserves Omega.
+
+        Returns ``(worst_polynomial, worst_omega)``.
+
+        ``worst_polynomial`` is the largest ``|p(g.z)|`` over the group and the
+        given points: of order one for a random defining polynomial, numerical
+        zero for an invariant one.
+
+        ``worst_omega`` measures the failure of Gamma to lie in SU(3). Omega is
+        the ambient holomorphic volume form divided by the Jacobian of the
+        defining polynomials, so under ``g`` it picks up ``det(g)`` divided by
+        the product of the polynomials' characters. That combination must be
+        one, and the deviation from one is what is returned.
+        """
+        worst_p = 0.0
+        worst_o = 0.0
+        # The character of each defining polynomial is measured on *ambient*
+        # points, deliberately not on the sampled ones: those lie on X, where
+        # the polynomial vanishes, so a ratio p(g.z)/p(z) there is 0/0 and
+        # numerically meaningless. Off the zero set it is exact.
+        rng = np.random.default_rng(0)
+        probe = (rng.normal(size=(32, self.ncoords))
+                 + 1j * rng.normal(size=(32, self.ncoords)))
+        for g in self.group_matrices:
+            moved = self._rescale_to_patch(points @ g.T)
+            for a in range(self.nhyper):
+                worst_p = max(worst_p,
+                              float(np.max(np.abs(self._evaluate(moved, a)))))
+
+            # Characters are read off the unrescaled images, so that the
+            # projective rescaling does not contaminate them.
+            chi = 1.0 + 0j
+            ok = True
+            for a in range(self.nhyper):
+                num = self._evaluate(probe @ g.T, a)
+                den = self._evaluate(probe, a)
+                good = np.abs(den) > 1e-6 * np.max(np.abs(den))
+                if not np.any(good):
+                    ok = False
+                    break
+                ratios = num[good] / den[good]
+                # median, not mean: the character is one number, so a robust
+                # estimator is the right one and an outlier from a nearly
+                # vanishing denominator should not move it
+                chi = chi * np.median(ratios.real) + 0j \
+                    if np.max(np.abs(ratios.imag)) < 1e-8 \
+                    else chi * np.mean(ratios)
+            if ok:
+                worst_o = max(worst_o,
+                              float(abs(np.linalg.det(g) / chi - 1.0)))
+        return worst_p, worst_o
+
+    def _evaluate(self, points, a):
+        """The a-th defining polynomial at each point."""
+        return np.sum(
+            self.coefficients[a] * np.prod(
+                points[:, None, :] ** self.monomials[a][None, :, :], axis=-1),
+            axis=-1)
 
     # -- the group action on points ---------------------------------------
 
@@ -175,52 +280,32 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
         """Put each ambient factor back in the one-coordinate-equals-one patch.
 
         Applying a group element multiplies coordinates by phases and may
-        permute factors, which takes a point out of the patch normalisation
-        the rest of cymetric assumes. Dividing each factor block by its
-        largest entry restores it, and is a projective rescaling, so it does
-        not move the point: the defining polynomials are homogeneous in each
-        factor separately, so scaling a block by lambda multiplies each
-        polynomial by a power of lambda and the zero set is unchanged.
+        permute factors, taking a point out of the patch normalisation the
+        rest of the package assumes. Dividing each factor block by its largest
+        entry restores it, and is a projective rescaling, so it does not move
+        the point: the defining polynomials are homogeneous in each factor
+        separately, so scaling a block multiplies each polynomial by a power of
+        the scalar and the zero set is unchanged.
         """
         pts = np.array(points, dtype=np.complex128, copy=True)
-        start = 0
-        for n in self.ambient:
-            end = start + int(n) + 1
-            block = pts[:, start:end]
+        for (s, e) in self._blocks:
+            block = pts[:, s:e]
             pivot = np.argmax(np.abs(block), axis=-1)
             scale = block[np.arange(len(block)), pivot]
-            pts[:, start:end] = block / scale[:, None]
-            start = end
+            pts[:, s:e] = block / scale[:, None]
         return pts
 
     def orbit(self, points):
         """Every image of every point under the group.
 
-        Returns an array of shape ``(len(group) * len(points), ncoords)``, with
-        the identity images first so that the original sample is a prefix.
+        Returns an array of shape ``(|Gamma| * len(points), ncoords)``. The
+        identity images come first -- the constructor sorts the identity to the
+        front of ``group_matrices`` -- so ``result[:len(points)]`` is the
+        original sample.
         """
         return np.concatenate(
             [self._rescale_to_patch(points @ g.T)
              for g in self.group_matrices], axis=0)
-
-    def verify_invariance(self, points, tol=1e-6):
-        """Check that the group really maps X to itself.
-
-        Returns the largest ``|p(g.z)|`` over the group and the given points.
-        A random defining polynomial gives an answer of order one here, an
-        invariant one gives numerical zero, and the difference is the whole
-        reason this class exists.
-        """
-        worst = 0.0
-        for g in self.group_matrices:
-            moved = self._rescale_to_patch(points @ g.T)
-            for a in range(self.nhyper):
-                vals = np.sum(
-                    self.coefficients[a] * np.prod(
-                        moved[:, None, :] ** self.monomials[a][None, :, :],
-                        axis=-1), axis=-1)
-                worst = max(worst, float(np.max(np.abs(vals))))
-        return worst
 
     # -- the generator contract -------------------------------------------
 
@@ -228,187 +313,68 @@ class EquivariantCICYPointGenerator(CICYPointGenerator):
                                normalize_to_vol_j=True):
         r"""As the parent, but with a Gamma-symmetric point set.
 
-        ``n_pw`` is the number of *orbits* requested, so the returned array has
-        ``|Gamma|`` times that many rows. Weights are recomputed by the parent
-        machinery on the augmented points and then divided by ``|Gamma|``, so
-        that the total measure is unchanged and integrals computed against the
-        result mean the same thing as before.
+        ``n_pw`` is the number of points **returned**, as in the parent: this
+        samples ``n_pw / |Gamma|`` orbits so that the total is ``n_pw``, rather
+        than silently returning ``|Gamma|`` times what was asked for.
+
+        Of those, only ``n_pw / |Gamma|`` are independent. The returned
+        structure carries an extra ``orbit_index`` field, zero for the original
+        sample and ``k`` for the image under the ``k``-th group element, so
+        that a caller can take one representative per orbit for integration, or
+        split train and validation without putting a point in one and its image
+        in the other.
+
+        Weights and volume forms are computed on the base sample and tiled.
+        That is ``|Gamma|`` times cheaper than recomputing them, and it makes
+        the values on an orbit agree *exactly* rather than to machine
+        precision.
         """
+        m = len(self.group_matrices)
+        if m == 1:
+            return super(EquivariantCICYPointGenerator,
+                         self).generate_point_weights(
+                n_pw, omega=omega, normalize_to_vol_j=normalize_to_vol_j)
+
+        n_base = max(1, int(n_pw) // m)
         base = super(EquivariantCICYPointGenerator,
                      self).generate_point_weights(
-            n_pw, omega=omega, normalize_to_vol_j=normalize_to_vol_j)
-        if len(self.group_matrices) == 1:
-            return base
+            n_base, omega=omega, normalize_to_vol_j=normalize_to_vol_j)
 
-        pts = self.orbit(base['point'])
         if self.check_invariance:
-            worst = self.verify_invariance(base['point'])
-            if worst > 1e-6:
+            worst_p, worst_o = self.verify_invariance(base['point'])
+            if worst_p > 1e-6:
                 raise ValueError(
                     'the group does not preserve this hypersurface: '
                     'max |p(g.z)| = %.3e over the sampled points. The '
                     'defining polynomial is probably not Gamma-invariant, in '
                     'which case the quotient does not exist and a metric '
                     'learned here would be a metric on the wrong space.'
-                    % worst)
+                    % worst_p)
+            if worst_o > 1e-6:
+                raise ValueError(
+                    'the group does not preserve the holomorphic volume form: '
+                    'det(g) / prod(chi_a) deviates from 1 by %.3e. Gamma is '
+                    'then in U(3) but not SU(3), Omega does not descend, and '
+                    'X/Gamma is not Calabi-Yau.' % worst_o)
 
-        out = np.zeros(len(pts), dtype=base.dtype)
+        pts = self.orbit(base['point'])
+        dtype = list(base.dtype.descr) + [('orbit_index', np.int32)]
+        out = np.zeros(len(pts), dtype=dtype)
         out['point'] = pts
-        divisor = self.gamma_order
-        if self.measure == 'quotient':
-            # once for the orbit augmentation, once more to descend
-            divisor = divisor * self.gamma_order
-        out['weight'] = self.point_weight(
-            pts, normalize_to_vol_j=normalize_to_vol_j) / divisor
+        # Tiled, not recomputed: the measure is Gamma-invariant, so these are
+        # equal by construction and tiling makes them equal exactly.
+        out['weight'] = np.tile(base['weight'], m)
         if omega:
-            out['omega'] = self.holomorphic_volume_form(pts)
+            out['omega'] = np.tile(base['omega'], m)
+        out['orbit_index'] = np.repeat(np.arange(m, dtype=np.int32), n_base)
         return out
 
+    @property
+    def vol_quotient(self):
+        """Vol(X/Gamma) = Vol(X)/|Gamma|.
 
-# ---------------------------------------------------------------------------
-# Symmetrising the model, which augmentation alone does not do
-# ---------------------------------------------------------------------------
-
-def symmetrised_phi(model_call, group_matrices, ncoords, ambient=None):
-    r"""Average a scalar potential over the group, making it exactly invariant.
-
-    Orbit augmentation makes the training *distribution* Gamma-symmetric. It
-    does not make the learned *function* Gamma-symmetric: a generic network fit
-    to symmetric data is only approximately invariant, and measurably so. On
-    the tetraquadric with a free Z_2, a Phi-model trained on orbit-augmented
-    data came out no more invariant than one trained on plain data --
-    2.8e-2 against 2.2e-2 relative deviation between g(z) and g(gamma.z).
-
-    Averaging fixes it by construction:
-
-        phi_sym(z) = (1/|Gamma|) sum_gamma phi(gamma . z) ,
-
-    which satisfies phi_sym(gamma.z) = phi_sym(z) identically, so the metric
-    g_FS + dd-bar phi_sym is exactly Gamma-invariant and descends to the
-    quotient with no training-dependent error at all. The cost is |Gamma|
-    network evaluations per point.
-
-    Args:
-        model_call: callable taking real features ``(2*ncoords,)`` and
-            returning a scalar.
-        group_matrices: the group, as in
-            :class:`EquivariantCICYPointGenerator`.
-        ncoords: number of homogeneous coordinates.
-        ambient: the ambient dimensions. Required, because each orbit image
-            must be put back in the patch before the network sees it -- see
-            below.
-
-    Returns:
-        callable with the same signature, invariant under the group.
-
-    Note:
-        The patch rescaling is not optional and is easy to leave out. Points
-        arrive normalised so that one coordinate per ambient factor equals
-        one; a group element moves that normalisation, so the orbit images
-        differ from the canonical representatives by a per-factor scalar. The
-        network is not scale invariant, so averaging the raw images gives a
-        function that is still not invariant -- measured at 1.9e-1 relative,
-        against 3.1e-1 for the unsymmetrised network, an improvement but not
-        the exact invariance the construction is supposed to give. Rescaling
-        each image first brings it to numerical zero.
-    """
-    import jax
-    import jax.numpy as jnp
-
-    mats = jnp.array(np.stack([np.asarray(g, dtype=np.complex128)
-                               for g in group_matrices]))
-
-    if ambient is None:
-        raise ValueError(
-            'ambient is required: each orbit image has to be put back in the '
-            'one-coordinate-equals-one patch before the network sees it, and '
-            'that needs to know where the factor blocks are')
-    bounds = []
-    start = 0
-    for n in np.asarray(ambient).astype(int):
-        bounds.append((start, start + int(n) + 1))
-        start += int(n) + 1
-
-    def _patch(w):
-        parts = []
-        for (a, b) in bounds:
-            blk = w[..., a:b]
-            piv = jnp.argmax(jnp.abs(blk), axis=-1)
-            scale = jnp.take_along_axis(blk, piv[..., None], axis=-1)
-            parts.append(blk / scale)
-        return jnp.concatenate(parts, axis=-1)
-
-    def _sym(x):
-        z = x[:ncoords] + 1j * x[ncoords:]
-        moved = _patch(jnp.einsum('gij,j->gi', mats, z))
-        feats = jnp.concatenate([jnp.real(moved), jnp.imag(moved)], axis=-1)
-        return jnp.mean(jax.vmap(model_call)(feats))
-
-    return _sym
-
-
-def make_symmetrised_net(inner, group_matrices, ambient, ncoords):
-    r"""Wrap a network so that a Phi-model built on it is exactly Gamma-invariant.
-
-    Returns an ``equinox`` module with the same call signature as ``inner``,
-    computing the group average of :func:`symmetrised_phi`. Because the
-    wrapper *is* the network, it can be handed straight to
-    ``PhiFSModel(nn_model, BASIS)`` with no change to the model, the losses or
-    the training loop::
-
-        net = make_symmetrised_net(mlp, args['group_matrices'],
-                                   args['ambient'], ncoords)
-        model = PhiFSModel(net, BASIS)
-
-    The group is stored as a static field, so it is not differentiated and
-    cannot drift during training. That matters: if the matrices were treated
-    as parameters the optimiser would happily move them, and the invariance
-    the construction guarantees would decay away over the run.
-
-    Measured on the tetraquadric with a free Z_2, five epochs, comparing the
-    trained metric at ``z`` and at ``gamma.z``:
-
-        plain network        Gamma-deviation  9.1e-03
-        symmetrised network  Gamma-deviation  1.7e-07
-
-    the latter being float32 machine precision. The sigma losses were 0.4446
-    and 0.4413, so the invariance costs nothing in fit quality -- the averaged
-    network is simply a smaller hypothesis class that happens to contain the
-    answer.
-    """
-    import equinox as eqx
-    import jax
-    import jax.numpy as jnp
-
-    mats_t = tuple(tuple(tuple(complex(v) for v in row)
-                         for row in np.asarray(g)) for g in group_matrices)
-    amb_t = tuple(int(a) for a in np.asarray(ambient))
-
-    class _SymNet(eqx.Module):
-        inner: eqx.Module
-        mats: tuple = eqx.field(static=True)
-        amb: tuple = eqx.field(static=True)
-        nc: int = eqx.field(static=True)
-
-        def __call__(self, x):
-            mats = jnp.array(self.mats, dtype=jnp.complex64)
-            bounds = []
-            start = 0
-            for n in self.amb:
-                bounds.append((start, start + n + 1))
-                start += n + 1
-            z = x[:self.nc] + 1j * x[self.nc:]
-            moved = jnp.einsum('gij,j->gi', mats, z)
-            parts = []
-            for (a, b) in bounds:
-                blk = moved[..., a:b]
-                piv = jnp.argmax(jnp.abs(blk), axis=-1)
-                scale = jnp.take_along_axis(blk, piv[..., None], axis=-1)
-                parts.append(blk / scale)
-            moved = jnp.concatenate(parts, axis=-1)
-            feats = jnp.concatenate([jnp.real(moved), jnp.imag(moved)],
-                                    axis=-1)
-            vals = jax.vmap(self.inner)(feats)
-            return jnp.mean(vals, axis=0)
-
-    return _SymNet(inner=inner, mats=mats_t, amb=amb_t, nc=int(ncoords))
+        For convenience only; the weights themselves are normalised to the
+        volume of the *cover*, because that is what the sample is.
+        """
+        return (self.get_volume_from_intersections(self.kmoduli)
+                / self.gamma_order)
