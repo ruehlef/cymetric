@@ -38,6 +38,7 @@ class FSModel(eqx.Module):
     nTransitions: int
     fixed_patches: jnp.ndarray  # may be None for nhyper > 1
     _proj_indices: jnp.ndarray
+    _proj_indices_list: list  # plain Python ints: static under JIT
     slopes: jnp.ndarray
 
     def __init__(self, BASIS, norm=None):
@@ -89,6 +90,7 @@ class FSModel(eqx.Module):
         else:
             self.fixed_patches = None
         self._proj_indices = self._generate_proj_indices()
+        self._proj_indices_list = [int(x) for x in np.asarray(self._generate_proj_indices())]
         self.slopes = self._target_slopes()
 
     # ------------------------------------------------------------------
@@ -100,7 +102,8 @@ class FSModel(eqx.Module):
         (equivalent of FSModel._generate_proj_matrix in TF).
         """
         proj_matrix = {}
-        degrees_np = np.array(self.degrees)
+        degrees_np = np.array(self._degrees_list)  # static: np.array on the
+        # traced self.degrees fails under jit for nhyper > 1
         ncoords = self.ncoords
         for i in range(self.nProjective):
             matrix = np.zeros((degrees_np[i], ncoords), dtype=np.complex64)
@@ -113,14 +116,15 @@ class FSModel(eqx.Module):
     def _generate_proj_indices(self):
         r"""Makes a 1-D array with the projective-space index for each coord."""
         flat_list = []
-        for i, p in enumerate(np.array(self.degrees)):
+        for i, p in enumerate(np.array(self._degrees_list)):
             for _ in range(p):
                 flat_list.append(i)
         return jnp.array(flat_list, dtype=jnp.int32)
 
     def _generate_all_patches(self):
         r"""Generate all possible patches for CICYs (nhyper == 1)."""
-        degrees_np = np.array(self.degrees)
+        degrees_np = np.array(self._degrees_list)  # static: np.array on the
+        # traced self.degrees fails under jit for nhyper > 1
         fixed_patches = []
         for i in range(self.ncoords):
             all_patches = np.array(
@@ -143,7 +147,8 @@ class FSModel(eqx.Module):
     def _patch_transitions(self):
         r"""Maximum number of patch transitions with the same fixed variables."""
         nTransitions = 0
-        degrees_np = np.array(self.degrees)
+        degrees_np = np.array(self._degrees_list)  # static: np.array on the
+        # traced self.degrees fails under jit for nhyper > 1
         for t in generate_monomials(self.nProjective, self.nhyper):
             tmp_deg = [int(d) - t[j] for j, d in enumerate(degrees_np)]
             n = int(np.prod(tmp_deg))
@@ -468,11 +473,12 @@ class FSModel(eqx.Module):
         Returns:
             jnp.ndarray, [nTransitions, nProjective], int64.
         """
-        degrees_np = np.array(self.degrees)
+        degrees_np = np.array(self._degrees_list)  # static: np.array on the
+        # traced self.degrees fails under jit for nhyper > 1
         ncoords = self.ncoords
         nProjective = self.nProjective
         nTransitions = self.nTransitions
-        proj_indices_np = np.array(self._proj_indices)
+        proj_indices_np = np.array(self._proj_indices_list)
 
         fixed_np = np.array(fixed)
         original_np = np.array(original)
