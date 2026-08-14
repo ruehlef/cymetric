@@ -8,8 +8,13 @@ using Mathematica as backend for numerical computations.
     Fabian Ruehle f.ruehle@northeastern.edu
 """
 
-from .pointgen_mathematica import PointGeneratorMathematica, ToricPointGeneratorMathematica
+# Optional backend: needs wolframclient, which is not a hard dependency.
+try:
+    from .pointgen_mathematica import PointGeneratorMathematica, ToricPointGeneratorMathematica
+except ImportError:  # pragma: no cover - optional
+    pass
 from .pointgen_cicy import CICYPointGenerator
+from .pointgen_equivariant import EquivariantCICYPointGenerator
 from .pointgen_toric import ToricPointGenerator
 from .pointgen import PointGenerator
 from .pointgen_mc import CICYPointGeneratorMC, ToricPointGeneratorMC
@@ -19,6 +24,7 @@ __all__ = [
     'PointGeneratorMathematica',
     'ToricPointGeneratorMathematica',
     'CICYPointGenerator',
+    'EquivariantCICYPointGenerator',
     'ToricPointGenerator',
     'PointGenerator',
     'CICYPointGeneratorMC',
