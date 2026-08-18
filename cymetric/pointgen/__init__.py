@@ -10,7 +10,6 @@ using Mathematica as backend for numerical computations.
 
 __all__ = [
     'CICYPointGenerator',
-    'EquivariantCICYPointGenerator',
     'ToricPointGenerator',
     'PointGenerator',
     'CICYPointGeneratorMC',
@@ -28,7 +27,6 @@ except ImportError: # pragma: no cover - optional
 else: __all__ += ['PointGeneratorMathematica', 'ToricPointGeneratorMathematica']
 
 from .pointgen_cicy import CICYPointGenerator
-from .pointgen_equivariant import EquivariantCICYPointGenerator
 from .pointgen_toric import ToricPointGenerator
 from .pointgen import PointGenerator
 from .pointgen_mc import CICYPointGeneratorMC, ToricPointGeneratorMC
