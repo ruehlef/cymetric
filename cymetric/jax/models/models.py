@@ -406,15 +406,19 @@ class PhiFSModel(FreeModel):
         if self.nhyper == 1:
             other_patches = self.fixed_patches[fixed[:, 0]]
         else:
-            n_p = points.shape[0]
-            other_patches_list = []
-            for xi in range(n_p):
-                combined = jnp.concatenate(
-                    [fixed[xi], patch_indices[xi]], axis=0)
-                op = self._generate_patches(
-                    combined[:self.nhyper], combined[self.nhyper:])
-                other_patches_list.append(op)
-            other_patches = jnp.stack(other_patches_list, axis=0)
+            # General nhyper case: vectorized lookup into the precomputed
+            # patch table (see FSModel._generate_patches_table), fully
+            # jit-compatible (no Python loop over the batch, no data
+            # dependent shapes).
+            combo_idx = jnp.zeros(fixed.shape[0], dtype=jnp.int32)
+            for j in range(self.nhyper):
+                combo_idx = combo_idx * self.ncoords + fixed[:, j]
+            patches_slice = self.fixed_patches[combo_idx]
+            npatches = self.fixed_patches_n[combo_idx]
+            valid = (jnp.arange(self.nTransitions)[None, :]
+                     < npatches[:, None])
+            other_patches = jnp.where(
+                valid[:, :, None], patches_slice, patch_indices[:, None, :])
 
         other_patches = other_patches.reshape(-1, self.nProjective)
         other_patch_mask = self._indices_to_mask(other_patches)

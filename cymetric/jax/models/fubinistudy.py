@@ -36,7 +36,8 @@ class FSModel(eqx.Module):
     lc: jnp.ndarray
     proj_matrix: dict
     nTransitions: int
-    fixed_patches: jnp.ndarray  # may be None for nhyper > 1
+    fixed_patches: jnp.ndarray
+    fixed_patches_n: jnp.ndarray  # None for nhyper == 1 (not needed there)
     _proj_indices: jnp.ndarray
     slopes: jnp.ndarray
 
@@ -83,12 +84,18 @@ class FSModel(eqx.Module):
         self.lc = jnp.array(
             get_levicivita_tensor(self.nfold), dtype=jnp.complex64)
         self.proj_matrix = self._generate_proj_matrix()
+        self._proj_indices = self._generate_proj_indices()
         self.nTransitions = self._patch_transitions()
         if self.nhyper == 1:
             self.fixed_patches = self._generate_all_patches()
+            self.fixed_patches_n = None
         else:
-            self.fixed_patches = None
-        self._proj_indices = self._generate_proj_indices()
+            # General nhyper table: precomputed (static, numpy) at init time.
+            # Indexed at runtime by a flattened combination of the `nhyper`
+            # fixed coordinates (one per hypersurface) using pure gather ops,
+            # so no data-dependent shapes/control-flow occur under jit.
+            self.fixed_patches, self.fixed_patches_n = \
+                self._generate_patches_table()
         self.slopes = self._target_slopes()
 
     # ------------------------------------------------------------------
@@ -456,49 +463,101 @@ class FSModel(eqx.Module):
         mask = jnp.sum(mask, axis=1)               # (bSize, ncoords)
         return mask
 
-    def _generate_patches(self, fixed, original):
-        r"""Generates possible patch transitions for a single point.
+    def _generate_patches_np(self, fixed_tuple, degrees_np, proj_indices_np):
+        r"""Numpy (static, non-traced) computation of the raw patch list for
+        one particular combination of `nhyper` fixed coordinate indices.
 
-        Equivalent to FSModel._generate_patches in TF.
+        This is the direct analogue of the per-point body of
+        FSModel._generate_patches in TF, minus the "pad with original patch"
+        step (which is data-dependent and therefore handled separately, at
+        runtime, using array ops -- see `compute_transition_loss`).
 
         Args:
-            fixed (jnp.ndarray, [nhyper], int64): Fixed coordinate indices.
-            original (jnp.ndarray, [nProjective], int64): Current patch indices.
+            fixed_tuple (tuple[int]): One fixed coordinate index per
+                hypersurface.
+            degrees_np (np.ndarray, [nProjective]): #coords per P^n factor.
+            proj_indices_np (np.ndarray, [ncoords]): Projective-space index
+                of every coordinate.
 
         Returns:
-            jnp.ndarray, [nTransitions, nProjective], int64.
+            np.ndarray, [npatches, nProjective], int64: All valid patches for
+            this fixed-coordinate combination (npatches may be < nTransitions,
+            or 0 if the combination is not realizable).
         """
-        degrees_np = np.array(self.degrees)
         ncoords = self.ncoords
         nProjective = self.nProjective
-        nTransitions = self.nTransitions
-        proj_indices_np = np.array(self._proj_indices)
-
-        fixed_np = np.array(fixed)
-        original_np = np.array(original)
-
         inv_fixed_mask = np.ones(ncoords, dtype=bool)
-        for f in fixed_np:
+        for f in fixed_tuple:
             inv_fixed_mask[f] = False
 
         fixed_proj = np.zeros(nProjective, dtype=int)
-        for f in fixed_np:
+        for f in fixed_tuple:
             fixed_proj[proj_indices_np[f]] += 1
 
         splits = degrees_np.astype(int) - fixed_proj
+        if np.any(splits < 0):
+            # Not realizable (e.g. two fixed coords collide in one factor
+            # more often than that factor's degree allows).
+            return np.zeros((0, nProjective), dtype=np.int64)
+
         all_coords = np.where(inv_fixed_mask)[0]
         products = []
         start = 0
         for s in splits:
             products.append(all_coords[start:start + s])
             start += s
-        all_patches = np.array(list(it.product(*products, repeat=1)))
-        npatches = len(all_patches)
-        if npatches != nTransitions:
-            same = np.tile(original_np, nTransitions - npatches)
-            same = same.reshape(-1, nProjective)
-            all_patches = np.concatenate([all_patches, same], axis=0)
-        return jnp.array(all_patches[:nTransitions], dtype=jnp.int32)
+        all_patches = np.array(list(it.product(*products, repeat=1)),
+                                dtype=np.int64).reshape(-1, nProjective)
+        return all_patches
+
+    def _generate_patches_table(self):
+        r"""Precomputes, at __init__ time (static, plain numpy/Python -- no
+        JAX tracing involved), a lookup table of all possible patches for
+        every combination of `nhyper` fixed coordinates.
+
+        This generalizes `_generate_all_patches` (which only handles
+        nhyper == 1) to arbitrary nhyper while remaining fully jittable:
+        the combinatorial enumeration (itertools.product over patches, the
+        equivalent of TF's tf.split + tf.meshgrid) happens once here using
+        purely static shape information (self.degrees, self._proj_indices),
+        never on traced point data. At runtime only a plain gather + a
+        boolean mask/where is needed (see `compute_transition_loss`), both
+        of which are ordinary jittable array ops with static shapes.
+
+        Returns:
+            table (jnp.ndarray, [ncoords**nhyper, nTransitions, nProjective],
+                int32): table[idx] holds up to nTransitions patches for the
+                fixed-coordinate combination encoded by idx (mixed-radix,
+                base ncoords, one digit per hypersurface).
+            table_n (jnp.ndarray, [ncoords**nhyper], int32): Number of valid
+                (non-padding) patches stored in table[idx].
+        """
+        ncoords = self.ncoords
+        nProjective = self.nProjective
+        nhyper = self.nhyper
+        nTransitions = self.nTransitions
+        degrees_np = np.array(self._degrees_list)
+        proj_indices_np = np.array(self._proj_indices)
+
+        n_combos = ncoords ** nhyper
+        table = np.zeros((n_combos, nTransitions, nProjective), dtype=np.int32)
+        table_n = np.zeros((n_combos,), dtype=np.int32)
+
+        for combo in it.product(range(ncoords), repeat=nhyper):
+            idx = 0
+            for f in combo:
+                idx = idx * ncoords + f
+            patches = self._generate_patches_np(
+                combo, degrees_np, proj_indices_np)
+            npatches = len(patches)
+            table_n[idx] = npatches
+            if npatches > 0:
+                reps = int(np.ceil(nTransitions / npatches))
+                tiled = np.tile(patches, (reps, 1))[:nTransitions]
+                table[idx, :len(tiled)] = tiled
+
+        return (jnp.array(table, dtype=jnp.int32),
+                jnp.array(table_n, dtype=jnp.int32))
 
     @eqx.filter_jit
     def _fubini_study_n_potentials(self, points, t=None):
@@ -632,16 +691,25 @@ class FSModel(eqx.Module):
         if self.nhyper == 1:
             other_patches = self.fixed_patches[fixed[:, 0]]       # (n_p, nTransitions, nProjective)
         else:
-            # generate patches per-point (only used for nhyper > 1, runs eagerly)
-            n_p = points.shape[0]
-            other_patches_list = []
-            for xi in range(n_p):
-                combined = jnp.concatenate(
-                    [fixed[xi], patch_indices[xi]], axis=0)
-                op = self._generate_patches(
-                    combined[:self.nhyper], combined[self.nhyper:])
-                other_patches_list.append(op)
-            other_patches = jnp.stack(other_patches_list, axis=0)
+            # General nhyper case: fully vectorized, jit-compatible lookup.
+            # `fixed` (n_p, nhyper) encodes, per point, which coordinate is
+            # fixed for each hypersurface. We look up the corresponding
+            # precomputed patch table (built once in __init__, see
+            # `_generate_patches_table`) via a flattened mixed-radix index --
+            # a plain gather, so this works fine under jit/vmap.
+            combo_idx = jnp.zeros(fixed.shape[0], dtype=jnp.int32)
+            for j in range(self.nhyper):
+                combo_idx = combo_idx * self.ncoords + fixed[:, j]
+            patches_slice = self.fixed_patches[combo_idx]   # (n_p, nTransitions, nProjective)
+            npatches = self.fixed_patches_n[combo_idx]       # (n_p,)
+            # Slots >= npatches are padding in the table; TF instead pads
+            # those slots with the point's *current* (original) patch --
+            # reproduce that here with a boolean mask + where (array ops
+            # only, no data-dependent shapes).
+            valid = (jnp.arange(self.nTransitions)[None, :]
+                     < npatches[:, None])                   # (n_p, nTransitions)
+            other_patches = jnp.where(
+                valid[:, :, None], patches_slice, patch_indices[:, None, :])
 
         other_patches = other_patches.reshape(-1, self.nProjective)
         other_patch_mask = self._indices_to_mask(other_patches)
