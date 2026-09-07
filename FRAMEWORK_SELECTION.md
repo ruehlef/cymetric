@@ -91,6 +91,7 @@ The JAX backend uses [Equinox](https://docs.kidger.site/equinox/) for neural net
 - Optimizers are `optax.GradientTransformation` objects (e.g. `optax.adam(lr)`)
 - Model weights are saved/loaded with `equinox.tree_serialise_leaves` / `equinox.tree_deserialise_leaves` (`.eqx` files)
 - Training uses JAX JIT compilation via `@equinox.filter_jit`
+- `jax.nn.gelu` defaults to `approximate=True` (tanh approximation) while `keras.activations.gelu` and `torch.nn.GELU` default to the exact `erf` form; the two differ by up to 4.73e-04 (at u = -2.70), so pass `approximate=False` to match the other backends
 
 ## Function Name Compatibility
 
