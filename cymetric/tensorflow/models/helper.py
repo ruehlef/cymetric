@@ -69,6 +69,11 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
         sample_weights = data['y_train'][:, -2]
     else:
         sample_weights = None
+
+    # The pullbacks depend only on the points, not on the network weights,
+    # so compute them once and hand them to fit() alongside the points.
+    train_pullbacks = fsmodel.pullbacks(
+        tf.cast(data['X_train'], dtype=tf.float32))
     if optimizer is None:
         optimizer = tf.keras.optimizers.Adam()
     # Compile once at start of training to avoid resetting optimizer
@@ -85,7 +90,7 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
         if verbose > 0:
             print("\nEpoch {:2d}/{:d}".format(epoch + 1, epochs))
         history = fsmodel.fit(
-            data['X_train'], data['y_train'],
+            (data['X_train'], train_pullbacks), data['y_train'],
             epochs=1, batch_size=batch_size, verbose=verbose,
             callbacks=None, sample_weight=sample_weights
         )
@@ -101,7 +106,7 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
         fsmodel.learn_ricci_val = tf.cast(False, dtype=tf.bool)
         fsmodel.learn_volk = tf.cast(True, dtype=tf.bool)
         history = fsmodel.fit(
-            data['X_train'], data['y_train'],
+            (data['X_train'], train_pullbacks), data['y_train'],
             epochs=1, batch_size=batch_size, verbose=verbose,
             callbacks=callbacks, sample_weight=sample_weights
         )

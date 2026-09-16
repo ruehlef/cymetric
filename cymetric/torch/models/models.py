@@ -115,7 +115,7 @@ class FreeModel(FSModel):
         # add to compile?
         self.sigma_loss = sigma_loss(self.kappa, torch.tensor(self.nfold, dtype=torch.float32, device=self.device))
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the NN.
 
         .. math:: g_{\text{out}} = g_{\text{NN}}
@@ -174,19 +174,23 @@ class FreeModel(FSModel):
         
         return out + low + torch.transpose(torch.conj(low), -2, -1)
 
-    def compute_loss(self, x, y, sample_weight=None):
+    def compute_loss(self, x, y, sample_weight=None, pb=None):
         r"""Computes the total loss for training.
 
         Args:
             x (torch.tensor): Input points
             y (torch.tensor): Target data (weights and omega values)
             sample_weight (torch.tensor, optional): Sample weights
+            pb (torch.tensor([bSize, nfold, ncoords], complex64), optional):
+                Precomputed pullbacks for x. They do not depend on the network
+                weights, so training computes them once and passes them in.
+                If None they are computed from the points. Defaults to None.
 
         Returns:
             torch.tensor: Total loss
         """
         # Get predictions
-        y_pred = self(x, training=True)
+        y_pred = self(x, training=True, pb=pb)
         
         total_loss = 0.0
         
@@ -311,7 +315,7 @@ class MultFSModel(FreeModel):
         """
         super(MultFSModel, self).__init__(*args, **kwargs)
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -338,7 +342,7 @@ class MultFSModel(FreeModel):
         # nn prediction
         nn_cont = self.to_hermitian(self.model(input_tensor))
         # fs metric
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         # return g_fs * (1 + g_NN)
         return fs_cont + torch.multiply(fs_cont, nn_cont)
 
@@ -361,7 +365,7 @@ class MatrixFSModel(FreeModel):
         """
         super(MatrixFSModel, self).__init__(*args, **kwargs)
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -386,7 +390,7 @@ class MatrixFSModel(FreeModel):
             self.model.eval()
             
         nn_cont = self.to_hermitian(self.model(input_tensor))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + torch.matmul(fs_cont, nn_cont)
 
 
@@ -407,7 +411,7 @@ class AddFSModel(FreeModel):
         """
         super(AddFSModel, self).__init__(*args, **kwargs)
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: g_{\text{out}; ij} = g_{\text{FS}; ij}  + g_{\text{NN}; ij}
@@ -430,7 +434,7 @@ class AddFSModel(FreeModel):
             self.model.eval()
             
         nn_cont = self.to_hermitian(self.model(input_tensor))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + nn_cont
 
 
@@ -474,7 +478,7 @@ class PhiFSModel(FreeModel):
         # automatic in Phi network
         self.learn_kaehler = False
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math::
@@ -536,7 +540,7 @@ class PhiFSModel(FreeModel):
         dd_phi = torch.complex(dx_dx_phi + dy_dy_phi, dx_dy_phi - dy_dx_phi)
         
         # Apply pullbacks
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi = torch.einsum('xai,xij,xbj->xab', pbs, dd_phi, torch.conj(pbs))
 
         # Get Fubini-Study metric
@@ -687,7 +691,7 @@ class ToricModel(FreeModel):
         self.lc = torch.tensor(get_levicivita_tensor(self.nfold), dtype=torch.complex64, device=self.device)
         self.slopes = self._target_slopes()
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Computes the equivalent of the pullbacked 
         Fubini-Study metric at each point in input_tensor.
 
@@ -705,7 +709,7 @@ class ToricModel(FreeModel):
                 Prediction at each point.
         """
         # FS prediction
-        return self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        return self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
 
     def fubini_study_pb(self, points, pb=None, j_elim=None, ts=None):
         r"""Computes the pullbacked Fubini-Study metric.
@@ -843,7 +847,7 @@ class PhiFSModelToric(ToricModel):
         super(PhiFSModelToric, self).__init__(*args, **kwargs)
         self.learn_kaehler = False
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -895,7 +899,7 @@ class PhiFSModelToric(ToricModel):
         dy_dy_phi = 0.25 * dd_phi[:, self.ncoords:, self.ncoords:]
         
         dd_phi = torch.complex(dx_dx_phi + dy_dy_phi, dx_dy_phi - dy_dx_phi)
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi = torch.einsum('xai,xij,xbj->xab', pbs, dd_phi, torch.conj(pbs))
         
         # fs metric
@@ -921,7 +925,7 @@ class MatrixFSModelToric(ToricModel):
         """
         super(MatrixFSModelToric, self).__init__(*args, **kwargs)
 
-    def forward(self, input_tensor, training=True, j_elim=None):
+    def forward(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -946,5 +950,5 @@ class MatrixFSModelToric(ToricModel):
             self.model.eval()
             
         nn_cont = self.to_hermitian(self.model(input_tensor))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + torch.matmul(fs_cont, nn_cont)
