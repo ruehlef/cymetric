@@ -49,45 +49,47 @@ __version__ = "0.4.0"
 __author__ = "Fabian Ruehle"
 __email__ = "f.ruehle@northeastern.edu"
 
+import importlib
 import os
 
-# Framework availability checks
-try:
-    import torch
-    _TORCH_AVAILABLE = True
-except ImportError:
-    _TORCH_AVAILABLE = False
+# Framework availability checks. The probes are deferred so that importing
+# cymetric.pointgen does not import an ML framework.
+_AVAILABLE = {}
 
-try:
-    import tensorflow as tf
-    _TF_AVAILABLE = True
-except ImportError:
-    _TF_AVAILABLE = False
+def _available(*modules):
+    """Check if every module in modules can be imported.
 
-try:
-    import jax
-    import equinox  # noqa: F401
-    _JAX_AVAILABLE = True
-except ImportError:
-    _JAX_AVAILABLE = False
+    The result is cached, so each framework is probed at most once.
+
+    Returns:
+        bool: True if all of modules import successfully
+    """
+    if modules not in _AVAILABLE:
+        try:
+            for module in modules:
+                importlib.import_module(module)
+            _AVAILABLE[modules] = True
+        except ImportError:
+            _AVAILABLE[modules] = False
+    return _AVAILABLE[modules]
 
 def check_torch():
     """Check if PyTorch is available."""
-    if not _TORCH_AVAILABLE:
+    if not _available('torch'):
         raise ImportError(
             "PyTorch is not installed. Install it with: pip install cymetric[torch]"
         )
 
 def check_tensorflow():
     """Check if TensorFlow is available."""
-    if not _TF_AVAILABLE:
+    if not _available('tensorflow'):
         raise ImportError(
             "TensorFlow is not installed. Install it with: pip install cymetric[tensorflow]"
         )
 
 def check_jax():
     """Check if JAX is available."""
-    if not _JAX_AVAILABLE:
+    if not _available('jax', 'equinox'):
         raise ImportError(
             "JAX is not installed. Install it with: pip install cymetric[jax]"
         )
@@ -102,13 +104,13 @@ def get_preferred_framework():
     preferred = os.environ.get('CYMETRIC_FRAMEWORK', '').lower()
     
     if preferred == 'torch' or preferred == 'pytorch':
-        if _TORCH_AVAILABLE:
+        if _available('torch'):
             return 'torch'
-        elif _TF_AVAILABLE:
+        elif _available('tensorflow'):
             import warnings
             warnings.warn("PyTorch requested but not available, falling back to TensorFlow")
             return 'tensorflow'
-        elif _JAX_AVAILABLE:
+        elif _available('jax', 'equinox'):
             import warnings
             warnings.warn("PyTorch requested but not available, falling back to JAX")
             return 'jax'
@@ -116,13 +118,13 @@ def get_preferred_framework():
             raise ImportError("PyTorch requested but no framework available")
     
     elif preferred == 'tf' or preferred == 'tensorflow':
-        if _TF_AVAILABLE:
+        if _available('tensorflow'):
             return 'tensorflow'
-        elif _TORCH_AVAILABLE:
+        elif _available('torch'):
             import warnings
             warnings.warn("TensorFlow requested but not available, falling back to PyTorch")
             return 'torch'
-        elif _JAX_AVAILABLE:
+        elif _available('jax', 'equinox'):
             import warnings
             warnings.warn("TensorFlow requested but not available, falling back to JAX")
             return 'jax'
@@ -130,13 +132,13 @@ def get_preferred_framework():
             raise ImportError("TensorFlow requested but no framework available")
     
     elif preferred == 'jax' or preferred == 'equinox':
-        if _JAX_AVAILABLE:
+        if _available('jax', 'equinox'):
             return 'jax'
-        elif _TF_AVAILABLE:
+        elif _available('tensorflow'):
             import warnings
             warnings.warn("JAX requested but not available, falling back to TensorFlow")
             return 'tensorflow'
-        elif _TORCH_AVAILABLE:
+        elif _available('torch'):
             import warnings
             warnings.warn("JAX requested but not available, falling back to PyTorch")
             return 'torch'
@@ -144,11 +146,11 @@ def get_preferred_framework():
             raise ImportError("JAX requested but no framework available")
     
     # Default behavior: prefer TensorFlow, then JAX, then PyTorch
-    if _TF_AVAILABLE:
+    if _available('tensorflow'):
         return 'tensorflow'
-    elif _JAX_AVAILABLE:
+    elif _available('jax', 'equinox'):
         return 'jax'
-    elif _TORCH_AVAILABLE:
+    elif _available('torch'):
         return 'torch'
     else:
         raise ImportError("No ML framework (PyTorch, TensorFlow, or JAX) available")
@@ -176,8 +178,22 @@ def set_preferred_framework(framework):
         if module != 'cymetric.models':  # Don't clear the package itself
             del sys.modules[module]
 
-# Expose framework availability
-TORCH_AVAILABLE = _TORCH_AVAILABLE
-TENSORFLOW_AVAILABLE = _TF_AVAILABLE
-JAX_AVAILABLE = _JAX_AVAILABLE
-PREFERRED_FRAMEWORK = get_preferred_framework()
+# Expose framework availability. Resolved on first access rather than at
+# import time, and then cached in the module namespace, so that code which
+# only uses cymetric.pointgen never triggers a framework import.
+_LAZY_ATTRS = {
+    'TORCH_AVAILABLE': lambda: _available('torch'),
+    'TENSORFLOW_AVAILABLE': lambda: _available('tensorflow'),
+    'JAX_AVAILABLE': lambda: _available('jax', 'equinox'),
+    'PREFERRED_FRAMEWORK': get_preferred_framework,
+}
+
+def __getattr__(name):
+    if name in _LAZY_ATTRS:
+        value = _LAZY_ATTRS[name]()
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+def __dir__():
+    return sorted(list(globals()) + list(_LAZY_ATTRS))
