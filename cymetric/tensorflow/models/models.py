@@ -121,7 +121,7 @@ class FreeModel(FSModel):
         # add to compile?
         self.sigma_loss = sigma_loss(self.kappa, tf.cast(self.nfold, dtype=tf.float32))
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the NN.
 
         .. math:: g_{\text{out}} = g_{\text{NN}}
@@ -208,12 +208,19 @@ class FreeModel(FSModel):
         else:
             sample_weight = None
             x, y = data
+        # train_model passes x as (points, pullbacks) so the pullbacks, which
+        # do not depend on the network weights, are computed once rather than
+        # in every forward pass. Plain points are still accepted.
+        if isinstance(x, (tuple, list)):
+            x, pbs = x
+        else:
+            pbs = None
 
         with tf.GradientTape(persistent=False) as tape:
             trainable_vars = self.model.trainable_variables
             # tape.watch(trainable_vars)  # Unnecessary in TF 2.x - GradientTape watches trainable vars automatically
             # add other loss contributions.
-            y_pred = self(x)
+            y_pred = self(x, pb=pbs)
             if self.learn_kaehler:
                 cijk_loss = self.compute_kaehler_loss(x)
             else:
@@ -306,7 +313,14 @@ class FreeModel(FSModel):
         else:
             sample_weight = None
             x, y = data
-        y_pred = self(x)
+        # train_model passes x as (points, pullbacks) so the pullbacks, which
+        # do not depend on the network weights, are computed once rather than
+        # in every forward pass. Plain points are still accepted.
+        if isinstance(x, (tuple, list)):
+            x, pbs = x
+        else:
+            pbs = None
+        y_pred = self(x, pb=pbs)
         # add loss contributions
         if self.learn_kaehler:
             cijk_loss = self.compute_kaehler_loss(x)
@@ -470,7 +484,7 @@ class MultFSModel(FreeModel):
         """
         super(MultFSModel, self).__init__(*args, **kwargs)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -491,7 +505,7 @@ class MultFSModel(FreeModel):
         # nn prediction
         nn_cont = self.to_hermitian(self.model(input_tensor, training=training))
         # fs metric
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         # return g_fs ( 1+ g_NN)
         return fs_cont + tf.math.multiply(fs_cont, nn_cont)
 
@@ -514,7 +528,7 @@ class MatrixFSModel(FreeModel):
         """
         super(MatrixFSModel, self).__init__(*args, **kwargs)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -533,7 +547,7 @@ class MatrixFSModel(FreeModel):
                 Prediction at each point.
         """
         nn_cont = self.to_hermitian(self.model(input_tensor, training=training))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + tf.linalg.matmul(fs_cont, nn_cont)
 
 
@@ -554,7 +568,7 @@ class AddFSModel(FreeModel):
         """
         super(AddFSModel, self).__init__(*args, **kwargs)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: g_{\text{out}; ij} = g_{\text{FS}; ij}  + g_{\text{NN}; ij}
@@ -571,7 +585,7 @@ class AddFSModel(FreeModel):
                 Prediction at each point.
         """
         nn_cont = self.to_hermitian(self.model(input_tensor, training=training))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + nn_cont
 
 
@@ -617,7 +631,7 @@ class PhiFSModel(FreeModel):
         # automatic in Phi network
         self.learn_kaehler = tf.cast(False, dtype=tf.bool)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math::
@@ -653,7 +667,7 @@ class PhiFSModel(FreeModel):
             0.25*dd_phi[:, self.ncoords:, :self.ncoords], \
             0.25*dd_phi[:, self.ncoords:, self.ncoords:]
         dd_phi = tf.complex(dx_dx_phi + dy_dy_phi, dx_dy_phi - dy_dx_phi)
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi = tf.einsum('xai,xij,xbj->xab', pbs, dd_phi, tf.math.conj(pbs))
 
         # fs metric
@@ -769,7 +783,7 @@ class ToricModel(FreeModel):
         self.lc = tf.convert_to_tensor(get_levicivita_tensor(self.nfold), dtype=tf.complex64)
         self.slopes = self._target_slopes()
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Computes the equivalent of the pullbacked 
         Fubini-Study metric at each point in input_tensor.
 
@@ -787,7 +801,7 @@ class ToricModel(FreeModel):
                 Prediction at each point.
         """
         # FS prediction
-        return self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        return self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
 
     def fubini_study_pb(self, points, pb=None, j_elim=None, ts=None):
         r"""Computes the pullbacked Fubini-Study metric.
@@ -1042,7 +1056,7 @@ class PhiFSModelToric(ToricModel):
         super(PhiFSModelToric, self).__init__(*args, **kwargs)
         self.learn_kaehler = tf.cast(False, dtype=tf.bool)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -1075,7 +1089,7 @@ class PhiFSModelToric(ToricModel):
             0.25*dd_phi[:, self.ncoords:, :self.ncoords], \
             0.25*dd_phi[:, self.ncoords:, self.ncoords:]
         dd_phi = tf.complex(dx_dx_phi + dy_dy_phi, dx_dy_phi - dy_dx_phi)
-        pbs = self.pullbacks(input_tensor, j_elim=j_elim)
+        pbs = self.pullbacks(input_tensor, j_elim=j_elim) if pb is None else pb
         dd_phi = tf.einsum('xai,xij,xbj->xab', pbs, dd_phi, tf.math.conj(pbs))
         
         # fs metric
@@ -1196,7 +1210,7 @@ class MatrixFSModelToric(ToricModel):
         """
         super(MatrixFSModelToric, self).__init__(*args, **kwargs)
 
-    def call(self, input_tensor, training=True, j_elim=None):
+    def call(self, input_tensor, training=True, j_elim=None, pb=None):
         r"""Prediction of the model.
 
         .. math:: 
@@ -1215,5 +1229,5 @@ class MatrixFSModelToric(ToricModel):
                 Prediction at each point.
         """
         nn_cont = self.to_hermitian(self.model(input_tensor, training=training))
-        fs_cont = self.fubini_study_pb(input_tensor, j_elim=j_elim)
+        fs_cont = self.fubini_study_pb(input_tensor, pb=pb, j_elim=j_elim)
         return fs_cont + tf.linalg.matmul(fs_cont, nn_cont)

@@ -44,6 +44,10 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
     # Convert data to tensors
     X_train = torch.tensor(data['X_train'], dtype=torch.float32, device=device)
     y_train = torch.tensor(data['y_train'], dtype=torch.float32, device=device)
+
+    # The pullbacks depend only on the points, not on the network weights, so
+    # compute them once and carry them through the loader alongside X and y.
+    train_pullbacks = fsmodel.pullbacks(X_train).detach()
     
     if sw:
         sample_weights = y_train[:, -2]
@@ -83,16 +87,16 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
         fsmodel.learn_volk = False
         
         # Create data loader for phase 1
-        dataset1 = torch.utils.data.TensorDataset(X_train, y_train)
+        dataset1 = torch.utils.data.TensorDataset(X_train, y_train, train_pullbacks)
         dataloader1 = torch.utils.data.DataLoader(dataset1, batch_size=batch_size, shuffle=True)
         
         epoch_loss1 = 0.0
         num_batches1 = 0
         
         fsmodel.train()
-        for batch_x, batch_y in tqdm.tqdm(dataloader1):
+        for batch_x, batch_y, batch_pb in tqdm.tqdm(dataloader1):
             optimizer.zero_grad()
-            loss = fsmodel.compute_loss(batch_x, batch_y, sample_weight=sample_weights)
+            loss = fsmodel.compute_loss(batch_x, batch_y, sample_weight=sample_weights, pb=batch_pb)
             loss.backward()
             
             # Gradient clipping
@@ -115,15 +119,15 @@ def train_model(fsmodel, data, optimizer=None, epochs=50, batch_sizes=[64, 10000
         fsmodel.learn_volk = True
         
         # Create data loader for phase 2
-        dataset2 = torch.utils.data.TensorDataset(X_train, y_train)
+        dataset2 = torch.utils.data.TensorDataset(X_train, y_train, train_pullbacks)
         dataloader2 = torch.utils.data.DataLoader(dataset2, batch_size=batch_size, shuffle=True)
         
         epoch_loss2 = 0.0
         num_batches2 = 0
         
-        for batch_x, batch_y in tqdm.tqdm(dataloader2):
+        for batch_x, batch_y, batch_pb in tqdm.tqdm(dataloader2):
             optimizer.zero_grad()
-            loss = fsmodel.compute_loss(batch_x, batch_y, sample_weight=sample_weights)
+            loss = fsmodel.compute_loss(batch_x, batch_y, sample_weight=sample_weights, pb=batch_pb)
             loss.backward()
             
             if hasattr(fsmodel, 'gclipping'):

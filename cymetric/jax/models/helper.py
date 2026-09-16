@@ -64,15 +64,15 @@ def _make_train_step(optimizer):
         optimizer (optax.GradientTransformation): An optax optimizer.
 
     Returns:
-        callable: ``train_step(model, opt_state, x, y, sw)``
+        callable: ``train_step(model, opt_state, x, y, sw, pb)``
     """
 
     @eqx.filter_jit
-    def train_step(model, opt_state, x, y, sample_weight=None):
+    def train_step(model, opt_state, x, y, sample_weight=None, pb=None):
         def loss_fn(nn_model):
             # Reconstruct the full model with the candidate NN
             full_model = eqx.tree_at(lambda m: m.model, model, nn_model)
-            total_loss, loss_dict = full_model.compute_loss(x, y, sample_weight)
+            total_loss, loss_dict = full_model.compute_loss(x, y, sample_weight, pb=pb)
             # Sum (not mean) over the batch for the gradient target: TF's
             # tape.gradient(total_loss, ...) on a non-scalar [bSize] target
             # implicitly uses output_gradients=ones_like(total_loss), i.e. it
@@ -143,6 +143,10 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
     X_train = jnp.array(data['X_train'], dtype=real_dtype())
     y_train = jnp.array(data['y_train'], dtype=real_dtype())
 
+    # The pullbacks depend only on the points, not on the network weights, so
+    # compute them once here instead of in every forward pass.
+    train_pullbacks = fsmodel.pullbacks(X_train)
+
     sample_weights = y_train[:, -2] if sw else None
 
     if optimizer is None:
@@ -171,6 +175,11 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
     hist1, hist2 = {}, {}
     n_train = len(X_train)
 
+    # Build the jitted step once, outside the loop. Rebuilding it each epoch
+    # made XLA recompile and retain an executable per epoch, which leaked
+    # memory on long runs.
+    train_step = _make_train_step(optimizer)
+
     for epoch in range(epochs):
         if verbose > 0:
             print('\nEpoch {:2d}/{:d}'.format(epoch + 1, epochs))
@@ -183,7 +192,6 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
         fsmodel = eqx.tree_at(lambda m: m.learn_volk,      fsmodel, False)
 
         batch_size1 = batch_sizes[0]
-        train_step = _make_train_step(optimizer)
         epoch_loss1 = 0.
         num_batches1 = 0
         indices = np.random.permutation(n_train)
@@ -194,10 +202,10 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
         for start in it1:
             end = min(start + batch_size1, n_train)
             idx = indices[start:end]
-            bx, by = X_train[idx], y_train[idx]
+            bx, by, bpb = X_train[idx], y_train[idx], train_pullbacks[idx]
             bsw = sample_weights[idx] if sample_weights is not None else None
             fsmodel, opt_state, loss_val, loss_components = train_step(
-                fsmodel, opt_state, bx, by, bsw)
+                fsmodel, opt_state, bx, by, bsw, bpb)
             epoch_loss1 += loss_val
             num_batches1 += 1
             # Update custom metrics
@@ -232,10 +240,10 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
         for start in it2:
             end = min(start + batch_size2, n_train)
             idx = indices2[start:end]
-            bx, by = X_train[idx], y_train[idx]
+            bx, by, bpb = X_train[idx], y_train[idx], train_pullbacks[idx]
             bsw = sample_weights[idx] if sample_weights is not None else None
             fsmodel, opt_state, loss_val, loss_components = train_step(
-                fsmodel, opt_state, bx, by, bsw)
+                fsmodel, opt_state, bx, by, bsw, bpb)
             epoch_loss2 += loss_val
             num_batches2 += 1
             if custom_metrics:
