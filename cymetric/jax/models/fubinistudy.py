@@ -12,6 +12,7 @@ from functools import partial
 import numpy as np
 
 from cymetric.pointgen.nphelper import generate_monomials, get_levicivita_tensor
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype, x64_enabled
 
 
 class FSModel(eqx.Module):
@@ -52,11 +53,18 @@ class FSModel(eqx.Module):
             norm ([5//NLOSS], optional): degree of norm for various losses.
                 Defaults to 1 for all but Kaehler norm (2).
         """
-        # Convert all numpy arrays in BASIS to JAX complex64 arrays
+        # Convert all numpy arrays in BASIS to JAX arrays at the working
+        # precision.  An already-complex entry keeps its own width, so a
+        # complex128 BASIS survives instead of being truncated to complex64
+        # (issue #5); everything else follows the x64 switch.
+        cdtype = complex_dtype()
         new_basis = {}
         for key in BASIS:
             if isinstance(BASIS[key], np.ndarray):
-                new_basis[key] = jnp.array(BASIS[key], dtype=jnp.complex64)
+                if np.iscomplexobj(BASIS[key]) and x64_enabled():
+                    new_basis[key] = jnp.array(BASIS[key], dtype=BASIS[key].dtype)
+                else:
+                    new_basis[key] = jnp.array(BASIS[key], dtype=cdtype)
             else:
                 new_basis[key] = BASIS[key]
         self.BASIS = new_basis
@@ -77,12 +85,12 @@ class FSModel(eqx.Module):
         self.degrees = jnp.ones_like(ambient_real) + ambient_real   # shape (nProjective,)
         # Plain Python list of ints — static under @eqx.filter_jit (not JAX-traced)
         self._degrees_list = [int(d) + 1 for d in np.real(BASIS['AMBIENT']).tolist()]
-        self.pi = jnp.array(np.pi, dtype=jnp.complex64)
+        self.pi = jnp.array(np.pi, dtype=complex_dtype())
         self.nhyper = int(jnp.real(self.BASIS['NHYPER']))
 
         # ---------- helpers generated at init time ----------
         self.lc = jnp.array(
-            get_levicivita_tensor(self.nfold), dtype=jnp.complex64)
+            get_levicivita_tensor(self.nfold), dtype=complex_dtype())
         self.proj_matrix = self._generate_proj_matrix()
         self._proj_indices = self._generate_proj_indices()
         self.nTransitions = self._patch_transitions()
@@ -114,7 +122,7 @@ class FSModel(eqx.Module):
             s = int(np.sum(degrees_np[:i]))
             e = int(np.sum(degrees_np[:i + 1]))
             matrix[:, s:e] = np.eye(degrees_np[i], dtype=np.complex64)
-            proj_matrix[str(i)] = jnp.array(matrix, dtype=jnp.complex64)
+            proj_matrix[str(i)] = jnp.array(matrix, dtype=complex_dtype())
         return proj_matrix
 
     def _generate_proj_indices(self):
@@ -160,7 +168,7 @@ class FSModel(eqx.Module):
 
     def _target_slopes(self):
         r"""Computes the target slopes mu(F_i) for the Volk loss."""
-        ks = jnp.eye(len(self.BASIS['KMODULI']), dtype=jnp.complex64)
+        ks = jnp.eye(len(self.BASIS['KMODULI']), dtype=complex_dtype())
         nfold = self.nfold
         intnums = self.BASIS['INTNUMS']
         kmoduli = self.BASIS['KMODULI']
@@ -207,8 +215,8 @@ class FSModel(eqx.Module):
         else:
             raise NotImplementedError('Only implemented for nfold <= 5.')
         inv_factorial = (1. / jnp.exp(jax.scipy.special.gammaln(
-            jnp.real(self.BASIS['NFOLD']).astype(jnp.float32) + 1.
-        ))).astype(jnp.complex64)
+            jnp.real(self.BASIS['NFOLD']).astype(real_dtype()) + 1.
+        ))).astype(complex_dtype())
         return inv_factorial * slope
 
     def __call__(self, input_tensor, training=True, j_elim=None):
@@ -255,8 +263,8 @@ class FSModel(eqx.Module):
                 self(xs[None], training=False)[0]))(x_single)
 
         # (bSize, nfold, nfold, 2*ncoords)
-        gijk_re = jax.vmap(jac_re)(x).astype(jnp.complex64)
-        gijk_im = jax.vmap(jac_im)(x).astype(jnp.complex64)
+        gijk_re = jax.vmap(jac_re)(x).astype(complex_dtype())
+        gijk_im = jax.vmap(jac_im)(x).astype(complex_dtype())
 
         nc = self.ncoords
         # Reconstruct complex 3-tensor c_ijk  (matches TF formula exactly)
@@ -296,7 +304,7 @@ class FSModel(eqx.Module):
             s0 = 0
             e0 = self._degrees_list[0]
             cpoints = (points[:, s0:e0]
-                       + 1j * points[:, self.ncoords + s0:self.ncoords + e0]).astype(jnp.complex64)
+                       + 1j * points[:, self.ncoords + s0:self.ncoords + e0]).astype(complex_dtype())
             fs = self._fubini_study_n_metrics(cpoints, n=self._degrees_list[0], t=ts[0])
             pm0 = self.proj_matrix['0']
             fs = jnp.einsum('xij,ia,bj->xab', fs, pm0, pm0.T)
@@ -304,7 +312,7 @@ class FSModel(eqx.Module):
                 s = sum(self._degrees_list[:i])
                 e = s + self._degrees_list[i]
                 cpoints = (points[:, s:e]
-                           + 1j * points[:, self.ncoords + s:self.ncoords + e]).astype(jnp.complex64)
+                           + 1j * points[:, self.ncoords + s:self.ncoords + e]).astype(complex_dtype())
                 fs_tmp = self._fubini_study_n_metrics(
                     cpoints, n=self._degrees_list[i], t=ts[i])
                 pmi = self.proj_matrix[str(i)]
@@ -312,7 +320,7 @@ class FSModel(eqx.Module):
                 fs = fs + fs_tmp
         else:
             cpoints = (points[:, :self.ncoords]
-                       + 1j * points[:, self.ncoords:2 * self.ncoords]).astype(jnp.complex64)
+                       + 1j * points[:, self.ncoords:2 * self.ncoords]).astype(complex_dtype())
             fs = self._fubini_study_n_metrics(cpoints, t=ts[0])
 
         if pb is None:
@@ -333,8 +341,8 @@ class FSModel(eqx.Module):
             jnp.ndarray, [bSize, nhyper], int64.
         """
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
-        available_mask = self._get_inv_one_mask(points).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
+        available_mask = self._get_inv_one_mask(points).astype(complex_dtype())
 
         indices = None
         for i in range(self.nhyper):
@@ -347,7 +355,7 @@ class FSModel(eqx.Module):
                     [indices, max_idx[:, None]], axis=-1)  # (n_p, i+1)
             available_mask = (available_mask
                               - jax.nn.one_hot(max_idx, self.ncoords,
-                                               dtype=jnp.complex64))
+                                               dtype=complex_dtype()))
         return indices.astype(jnp.int32)
 
     @eqx.filter_jit
@@ -391,13 +399,13 @@ class FSModel(eqx.Module):
         nfold = self.nfold
         nhyper = self.nhyper
 
-        cpoint = (point[:ncoords] + 1j * point[ncoords:]).astype(jnp.complex64)
+        cpoint = (point[:ncoords] + 1j * point[ncoords:]).astype(complex_dtype())
 
         # Build full mask: True for "good" (free) coordinates
         inv_one_mask = ~jnp.isclose(cpoint, 1. + 0j)          # (ncoords,) bool
-        full_mask = inv_one_mask.astype(jnp.float32)
+        full_mask = inv_one_mask.astype(real_dtype())
         for i in range(nhyper):
-            dQdz_mask = -1. * jax.nn.one_hot(dQdz_idx[i], ncoords, dtype=jnp.float32)
+            dQdz_mask = -1. * jax.nn.one_hot(dQdz_idx[i], ncoords, dtype=real_dtype())
             full_mask = full_mask + dQdz_mask
         full_mask = full_mask.astype(bool)                     # (ncoords,), nfold True
 
@@ -405,7 +413,7 @@ class FSModel(eqx.Module):
         good_indices = jnp.nonzero(full_mask, size=nfold)[0].astype(jnp.int32)
 
         # Initialise pullback matrix (nfold, ncoords)
-        pb = jnp.zeros((nfold, ncoords), dtype=jnp.complex64)
+        pb = jnp.zeros((nfold, ncoords), dtype=complex_dtype())
 
         # Set identity block: pb[a, good_indices[a]] = 1
         pb = pb.at[jnp.arange(nfold), good_indices].set(1. + 0j)
@@ -450,7 +458,7 @@ class FSModel(eqx.Module):
     def _get_inv_one_mask(self, points):
         r"""True when z_i != 1+0j (equivalent to TF version)."""
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         return ~jnp.isclose(cpoints, jnp.ones_like(cpoints))
 
     @eqx.filter_jit
@@ -459,7 +467,7 @@ class FSModel(eqx.Module):
         Equivalent to FSModel._indices_to_mask in TF.
         """
         mask = jax.nn.one_hot(indices, num_classes=self.ncoords,
-                              dtype=jnp.float32)   # (bSize, k, ncoords)
+                              dtype=real_dtype())   # (bSize, k, ncoords)
         mask = jnp.sum(mask, axis=1)               # (bSize, ncoords)
         return mask
 
@@ -573,10 +581,10 @@ class FSModel(eqx.Module):
             jnp.ndarray, [bSize], float32.
         """
         if t is None:
-            t = jnp.complex64(1. + 0j)
+            t = jnp.asarray(1. + 0j, dtype=complex_dtype())
         point_square = jnp.sum(jnp.abs(points) ** 2, axis=-1)
-        return (jnp.real(t / self.pi).astype(jnp.float32)
-                * jnp.real(jnp.log(point_square)).astype(jnp.float32))
+        return (jnp.real(t / self.pi).astype(real_dtype())
+                * jnp.real(jnp.log(point_square)).astype(real_dtype()))
 
     @eqx.filter_jit
     def _fubini_study_n_metrics(self, points, n=None, t=None):
@@ -595,11 +603,11 @@ class FSModel(eqx.Module):
         if n is None:
             n = self.ncoords
         if t is None:
-            t = jnp.complex64(1. + 0j)
-        point_square = jnp.sum(jnp.abs(points) ** 2, axis=-1).astype(jnp.complex64)
+            t = jnp.asarray(1. + 0j, dtype=complex_dtype())
+        point_square = jnp.sum(jnp.abs(points) ** 2, axis=-1).astype(complex_dtype())
         point_diag = jnp.einsum('x,ij->xij', point_square,
-                                jnp.eye(n, dtype=jnp.complex64))
-        outer = jnp.einsum('xi,xj->xij', jnp.conj(points), points).astype(jnp.complex64)
+                                jnp.eye(n, dtype=complex_dtype()))
+        outer = jnp.einsum('xi,xj->xij', jnp.conj(points), points).astype(complex_dtype())
         gFS = jnp.einsum('xij,x->xij',
                          (point_diag - outer),
                          point_square ** -2)
@@ -645,7 +653,7 @@ class FSModel(eqx.Module):
         Returns:
             jnp.ndarray, [bSize, ncoords], complex64.
         """
-        patch_mask_c = patch_mask.astype(jnp.complex64)
+        patch_mask_c = patch_mask.astype(complex_dtype())
         norm_parts = []
         for i in range(self.nProjective):
             s = sum(self._degrees_list[:i])
@@ -685,7 +693,7 @@ class FSModel(eqx.Module):
 
         current_patch_mask = self._indices_to_mask(patch_indices)
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         fixed = self._find_max_dQ_coords(points)
 
         if self.nhyper == 1:
@@ -766,7 +774,7 @@ class FSModel(eqx.Module):
 
         # g1_mask / g2_mask: True for free coordinates (not fixed, not patch coord)
         fixed_oh = jnp.sum(
-            jax.nn.one_hot(fixed, ncoords, dtype=jnp.float32), axis=-2)  # (n_p, ncoords)
+            jax.nn.one_hot(fixed, ncoords, dtype=real_dtype()), axis=-2)  # (n_p, ncoords)
         g1_mask = ~(fixed_oh + i_mask).astype(bool)   # (n_p, ncoords), nfold True/row
         g2_mask = ~(fixed_oh + j_mask).astype(bool)   # (n_p, ncoords), nfold True/row
 
@@ -793,9 +801,9 @@ class FSModel(eqx.Module):
         # Patch coordinate values and per-projective-space ratios: (n_p, nProjective)
         i_pts = jnp.take_along_axis(points, p1, axis=-1)
         j_pts = jnp.take_along_axis(points, p2, axis=-1)
-        ratios = (i_pts / j_pts).astype(jnp.complex64)
+        ratios = (i_pts / j_pts).astype(complex_dtype())
 
-        tij = jnp.zeros((n_p, nfold, nfold), dtype=jnp.complex64)
+        tij = jnp.zeros((n_p, nfold, nfold), dtype=complex_dtype())
 
         # ── Mixed-ratio elements (loop over projective spaces) ──────────────
         # For each j: tij[x, i, k] = -points[x, g2_i[x,k]] * ratios[x,j] / points[x, p2[x,j]]
@@ -811,21 +819,21 @@ class FSModel(eqx.Module):
                 points, p2[:, j:j + 1], axis=-1)[:, 0]                # (n_p,)
             t_vals  = (
                 -1. * num_t * ratio_t[:, None] / denom_t[:, None]
-            ).astype(jnp.complex64)                                    # (n_p, nfold)
+            ).astype(complex_dtype())                                    # (n_p, nfold)
 
             # Accumulate: tij[x,i,k] += t_vals[x,k] where t_pos[x,i,k]==1
-            tij = tij + (t_vals[:, None, :] * t_pos).astype(jnp.complex64)
+            tij = tij + (t_vals[:, None, :] * t_pos).astype(complex_dtype())
 
         # ── Single-ratio (diagonal-like) elements ───────────────────────────
         # For each (x, a, b) where g1_i[x,a] == g2_i[x,b]:
         #   tij[x, a, b] = ratios[x, g1_proj[x,a]]
         c_cond   = (g1_i[:, :, None] == g2_i[:, None, :])              # (n_p, nfold, nfold)
         c_ratios = jnp.take_along_axis(ratios, g1_proj, axis=-1)       # (n_p, nfold)
-        tij = jnp.where(c_cond, c_ratios[:, :, None].astype(jnp.complex64), tij)
+        tij = jnp.where(c_cond, c_ratios[:, :, None].astype(complex_dtype()), tij)
 
         # ── Same-patch transitions → identity matrix ────────────────────────
         eye_bc = jnp.broadcast_to(
-            jnp.eye(nfold, dtype=jnp.complex64)[None], (n_p, nfold, nfold))
+            jnp.eye(nfold, dtype=complex_dtype())[None], (n_p, nfold, nfold))
         tij = jnp.where(same_patch[:, None, None], eye_bc, tij)
 
         return tij
@@ -866,7 +874,7 @@ class FSModel(eqx.Module):
             return jax.grad(log_det_single)(x_single)              # (2*ncoords,)
 
         # d_i d_j log det  — (bSize, 2*ncoords, 2*ncoords)
-        didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(jnp.complex64)
+        didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(complex_dtype())
 
         # Reconstruct complex Ricci tensor (exactly as in TF)
         ricci_ij = (didj_dg[:, :ncoords, :ncoords]

@@ -5,6 +5,7 @@ Faithful translation of the TensorFlow losses.py.
 """
 import jax
 import jax.numpy as jnp
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype
 
 
 def sigma_loss(kappa=1., nfold=3., flat=False):
@@ -38,13 +39,13 @@ def sigma_loss(kappa=1., nfold=3., flat=False):
         Returns:
             jnp.ndarray, [bSize, nfold, nfold], complex64.
         """
-        t1 = jnp.reshape(x + 0j, (-1, nfold_int, nfold_int)).astype(jnp.complex64)
+        t1 = jnp.reshape(x + 0j, (-1, nfold_int, nfold_int)).astype(complex_dtype())
         up = jnp.triu(t1)                       # upper triangular  (TF: band_part(t1, 0, -1))
         low = jnp.tril(1j * t1)                 # lower triangular  (TF: band_part(1j*t1, -1, 0))
         # diagonal matrix from t1  (TF: band_part(t1, 0, 0))
         diag_vals = jnp.diagonal(t1, axis1=-2, axis2=-1)          # (bSize, nfold)
         diag_mat = jnp.einsum('...i,ij->...ij', diag_vals,
-                              jnp.eye(nfold_int, dtype=jnp.complex64))
+                              jnp.eye(nfold_int, dtype=complex_dtype()))
         out = up + jnp.swapaxes(up, -2, -1) - diag_mat
         return out + low + jnp.conj(jnp.swapaxes(low, -2, -1))
 

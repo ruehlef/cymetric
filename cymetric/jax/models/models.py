@@ -23,6 +23,7 @@ from .fubinistudy import FSModel
 from cymetric.pointgen.nphelper import (
     get_all_patch_degrees, compute_all_w_of_x, get_levicivita_tensor,
 )
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +43,13 @@ def _to_hermitian(x, nfold):
     Returns:
         jnp.ndarray, [bSize, nfold, nfold], complex64.
     """
-    t1 = jnp.reshape(x + 0j, (-1, nfold, nfold)).astype(jnp.complex64)
+    t1 = jnp.reshape(x + 0j, (-1, nfold, nfold)).astype(complex_dtype())
     up = jnp.triu(t1)           # tf.linalg.band_part(t1, 0, -1)
     low = jnp.tril(1j * t1)    # tf.linalg.band_part(1j*t1, -1, 0)
     # diagonal matrix
     diag_vals = jnp.diagonal(t1, axis1=-2, axis2=-1)       # (bSize, nfold)
     diag_mat = jnp.einsum('...i,ij->...ij', diag_vals,
-                          jnp.eye(nfold, dtype=jnp.complex64))
+                          jnp.eye(nfold, dtype=complex_dtype()))
     out = up + jnp.swapaxes(up, -2, -1) - diag_mat
     return out + low + jnp.conj(jnp.swapaxes(low, -2, -1))
 
@@ -171,12 +172,12 @@ class FreeModel(FSModel):
         if pred is None:
             pred = self(input_tensor)
 
-        aux_weights = (wo[:, 0] / wo[:, 1]).astype(jnp.complex64)
+        aux_weights = (wo[:, 0] / wo[:, 1]).astype(complex_dtype())
         nk = len(self.BASIS['KMODULI'])
         aux_weights = jnp.repeat(aux_weights[None, :], nk, axis=0)
         # (nk, bSize)
 
-        ks = jnp.eye(nk, dtype=jnp.complex64)
+        ks = jnp.eye(nk, dtype=complex_dtype())
 
         # Build actual_slopes via a Python loop (matches TF while_loop logic)
         actual_slopes = None
@@ -216,7 +217,7 @@ class FreeModel(FSModel):
 
         cijk_loss = (self.compute_kaehler_loss(x)
                      if self.learn_kaehler
-                     else jnp.zeros(x.shape[0], dtype=jnp.float32))
+                     else jnp.zeros(x.shape[0], dtype=real_dtype()))
 
         t_loss = (self.compute_transition_loss(x)
                   if self.learn_transition
@@ -377,7 +378,7 @@ class PhiFSModel(FreeModel):
         dy_dx_phi = 0.25 * dd_phi[:, nc:, :nc]
         dy_dy_phi = 0.25 * dd_phi[:, nc:, nc:]
         dd_phi_c = (dx_dx_phi + dy_dy_phi
-                    + 1j * (dx_dy_phi - dy_dx_phi)).astype(jnp.complex64)
+                    + 1j * (dx_dy_phi - dy_dx_phi)).astype(complex_dtype())
 
         pbs = self.pullbacks(input_tensor, j_elim=j_elim)
         dd_phi_pb = jnp.einsum('xai,xij,xbj->xab', pbs, dd_phi_c, jnp.conj(pbs))
@@ -401,7 +402,7 @@ class PhiFSModel(FreeModel):
         current_patch_mask = self._indices_to_mask(patch_indices)
         fixed = self._find_max_dQ_coords(points)
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
 
         if self.nhyper == 1:
             other_patches = self.fixed_patches[fixed[:, 0]]
@@ -443,18 +444,18 @@ class PhiFSModel(FreeModel):
             s0 = 0
             e0 = int(self.degrees[0])
             cpoints = (points[:, s0:e0]
-                       + 1j * points[:, self.ncoords + s0: self.ncoords + e0]).astype(jnp.complex64)
+                       + 1j * points[:, self.ncoords + s0: self.ncoords + e0]).astype(complex_dtype())
             k_fs = self._fubini_study_n_potentials(cpoints, t=self.BASIS['KMODULI'][0])
             for i in range(1, self.nProjective):
                 s = int(jnp.sum(self.degrees[:i]))
                 e = s + int(self.degrees[i])
                 cpoints = (points[:, s:e]
-                           + 1j * points[:, self.ncoords + s: self.ncoords + e]).astype(jnp.complex64)
+                           + 1j * points[:, self.ncoords + s: self.ncoords + e]).astype(complex_dtype())
                 k_fs = k_fs + self._fubini_study_n_potentials(
                     cpoints, t=self.BASIS['KMODULI'][i])
         else:
             cpoints = (points[:, :self.ncoords]
-                       + 1j * points[:, self.ncoords:2 * self.ncoords]).astype(jnp.complex64)
+                       + 1j * points[:, self.ncoords:2 * self.ncoords]).astype(complex_dtype())
             k_fs = self._fubini_study_n_potentials(
                 cpoints, t=self.BASIS['KMODULI'][0])
 
@@ -490,7 +491,7 @@ class ToricModel(FreeModel):
         """
         self.nfold = toric_data['dim_cy']
         self.sections = [
-            jnp.array(m, dtype=jnp.complex64)
+            jnp.array(m, dtype=complex_dtype())
             for m in toric_data['exps_sections']
         ]
         self.patch_masks_arr = jnp.array(
@@ -502,7 +503,7 @@ class ToricModel(FreeModel):
         super(ToricModel, self).__init__(*args, **kwargs)
         self.kmoduli = self.BASIS['KMODULI']
         self.lc = jnp.array(
-            get_levicivita_tensor(self.nfold), dtype=jnp.complex64)
+            get_levicivita_tensor(self.nfold), dtype=complex_dtype())
         self.slopes = self._target_slopes()
 
     def __call__(self, input_tensor, training=True, j_elim=None):
@@ -521,7 +522,7 @@ class ToricModel(FreeModel):
             ts = self.BASIS['KMODULI']
         pullbacks = self.pullbacks(points, j_elim=j_elim) if pb is None else pb
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         Js = self._fubini_study_n_metrics(cpoints, n=0, t=ts[0])
         for i in range(1, len(self.kmoduli)):
             Js = Js + self._fubini_study_n_metrics(cpoints, n=i, t=ts[i])
@@ -535,7 +536,7 @@ class ToricModel(FreeModel):
         Equivalent to ToricModel._fubini_study_n_metrics in TF.
         """
         if t is None:
-            t = jnp.complex64(1. + 0j)
+            t = jnp.asarray(1. + 0j, dtype=complex_dtype())
         alpha = 0 if n is None else n
         degrees = self.sections[alpha]
         ms = jnp.prod(
@@ -548,7 +549,7 @@ class ToricModel(FreeModel):
                               1. / kappa_alphas ** 2, J_alphas)
         coeffs = (jnp.einsum('xa,xb,ai,aj->xij', mss, mss, degrees, degrees)
                   - jnp.einsum('xa,xb,ai,bj->xij', mss, mss, degrees, degrees))
-        return J_alphas * coeffs * t / jnp.array(np.pi, dtype=jnp.complex64)
+        return J_alphas * coeffs * t / jnp.array(np.pi, dtype=complex_dtype())
 
     def _generate_helpers(self):
         """Toric-specific helpers (patch degrees, transition data)."""
@@ -559,9 +560,9 @@ class ToricModel(FreeModel):
         gc_np = np.array(self.glsm_charges)
         patch_degrees = get_all_patch_degrees(gc_np, pm_np)
         w_of_x, del_w_of_x, del_w_of_z = compute_all_w_of_x(patch_degrees, pm_np)
-        self.patch_degrees = jnp.array(patch_degrees, dtype=jnp.complex64)
-        self.transition_coefficients = jnp.array(w_of_x, dtype=jnp.complex64)
-        self.transition_degrees = jnp.array(del_w_of_z, dtype=jnp.complex64)
+        self.patch_degrees = jnp.array(patch_degrees, dtype=complex_dtype())
+        self.transition_coefficients = jnp.array(w_of_x, dtype=complex_dtype())
+        self.transition_degrees = jnp.array(del_w_of_z, dtype=complex_dtype())
         self.proj_matrix = None
         self._proj_indices = None
 
@@ -609,7 +610,7 @@ class ToricModel(FreeModel):
         current_patch_index = self._mask_to_patch_index(
             current_patch_mask).reshape(-1, 1)
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         fixed = self._find_max_dQ_coords(points)
         other_patches = self.fixed_patches[
             jnp.concatenate([fixed, current_patch_index], axis=-1)[:, 0],
@@ -665,9 +666,9 @@ class ToricModel(FreeModel):
         tij_red = tij_coeff * tij_red
         tij_red = jnp.transpose(tij_red, (0, 2, 1))
 
-        tij_eye = jnp.tile(jnp.eye(self.nfold, dtype=jnp.complex64)[None],
+        tij_eye = jnp.tile(jnp.eye(self.nfold, dtype=complex_dtype())[None],
                            (n_p - n_p_red, 1, 1))
-        tij_all = jnp.zeros((n_p, self.nfold, self.nfold), dtype=jnp.complex64)
+        tij_all = jnp.zeros((n_p, self.nfold, self.nfold), dtype=complex_dtype())
         tij_all = tij_all.at[diff_patch].set(tij_red)
         tij_all = tij_all.at[same_patch].set(tij_eye)
         return tij_all
@@ -679,15 +680,15 @@ class ToricModel(FreeModel):
         Equivalent to PhiFSModelToric._fubini_study_n_potentials in TF.
         """
         if t is None:
-            t = jnp.complex64(1. + 0j)
+            t = jnp.asarray(1. + 0j, dtype=complex_dtype())
         alpha = 0 if n is None else n
         degrees = self.sections[alpha]
         ms = jnp.prod(
             points[:, None, :] ** degrees[None, :, :], axis=-1)
         mss = ms * jnp.conj(ms)
         kappa_alphas = jnp.sum(mss, axis=-1)
-        return (jnp.real(t / np.pi).astype(jnp.float32)
-                * jnp.real(jnp.log(kappa_alphas)).astype(jnp.float32))
+        return (jnp.real(t / np.pi).astype(real_dtype())
+                * jnp.real(jnp.log(kappa_alphas)).astype(real_dtype()))
 
     def get_kahler_potential(self, points):
         r"""Toric FS Kähler potential K = sum_alpha t_alpha ln rho_alpha.
@@ -695,7 +696,7 @@ class ToricModel(FreeModel):
         Equivalent to PhiFSModelToric.get_kahler_potential in TF.
         """
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         k_fs = self._fubini_study_n_potentials(cpoints, t=self.kmoduli[0])
         for i in range(1, len(self.kmoduli)):
             k_fs = k_fs + self._fubini_study_n_potentials(cpoints, i, t=self.kmoduli[i])
@@ -740,7 +741,7 @@ class PhiFSModelToric(ToricModel):
         dy_dx_phi = 0.25 * dd_phi[:, nc:, :nc]
         dy_dy_phi = 0.25 * dd_phi[:, nc:, nc:]
         dd_phi_c = (dx_dx_phi + dy_dy_phi
-                    + 1j * (dx_dy_phi - dy_dx_phi)).astype(jnp.complex64)
+                    + 1j * (dx_dy_phi - dy_dx_phi)).astype(complex_dtype())
 
         pbs = self.pullbacks(input_tensor, j_elim=j_elim)
         dd_phi_pb = jnp.einsum('xai,xij,xbj->xab', pbs, dd_phi_c, jnp.conj(pbs))
@@ -757,7 +758,7 @@ class PhiFSModelToric(ToricModel):
             return super(PhiFSModelToric, self).compute_transition_loss(points)
 
         cpoints = (points[:, :self.ncoords]
-                   + 1j * points[:, self.ncoords:]).astype(jnp.complex64)
+                   + 1j * points[:, self.ncoords:]).astype(complex_dtype())
         num_pns = self.glsm_charges.shape[0]
 
         # Random scalings (same logic as TF version)
@@ -765,15 +766,15 @@ class PhiFSModelToric(ToricModel):
         key, k1, k2 = jax.random.split(key, 3)
         scale_factor_rand = jax.random.uniform(
             k1, shape=(num_random_scalings, num_pns),
-            minval=0.1, maxval=0.9, dtype=jnp.float32).astype(jnp.complex64)
+            minval=0.1, maxval=0.9, dtype=real_dtype()).astype(complex_dtype())
         scale_factor_rand = jnp.repeat(
             scale_factor_rand[:, :, None], self.ncoords, axis=-1)
 
         lambdas_rand_2 = jax.random.uniform(
             k2, shape=(num_random_scalings, num_pns, 2),
-            minval=-1., maxval=1., dtype=jnp.float32)
+            minval=-1., maxval=1., dtype=real_dtype())
         lambdas_rand = (lambdas_rand_2[:, :, 0]
-                        + 1j * lambdas_rand_2[:, :, 1]).astype(jnp.complex64)
+                        + 1j * lambdas_rand_2[:, :, 1]).astype(complex_dtype())
         lambdas_rand = jnp.repeat(lambdas_rand[:, :, None], self.ncoords, axis=-1)
         lambdas_rand = (scale_factor_rand * lambdas_rand
                         / (lambdas_rand * jnp.conj(lambdas_rand)) ** 0.5)

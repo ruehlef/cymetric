@@ -12,6 +12,7 @@ from .measures import (
     ricci_measure, sigma_measure,
     kaehler_measure_loss, transition_measure_loss, ricci_scalar_fn,
 )
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype
 
 
 class AlphaCallback:
@@ -60,8 +61,8 @@ class KaehlerCallback:
             bSize (int): Batch size for evaluation. Defaults to 1000.
             initial (bool): If True, run before training. Defaults to False.
         """
-        self.X_val = jnp.array(validation_data[0], dtype=jnp.float32)
-        self.y_val = jnp.array(validation_data[1], dtype=jnp.float32)
+        self.X_val = jnp.array(validation_data[0], dtype=real_dtype())
+        self.y_val = jnp.array(validation_data[1], dtype=real_dtype())
         self.weights = self.y_val[:, -2]
         self.omega = self.y_val[:, -1]
         self.nth = nth
@@ -121,12 +122,12 @@ class RicciCallback:
             hlevel (int): Extra statistics level. Defaults to 0.
             initial (bool): If True, run before training. Defaults to False.
         """
-        self.X_val = jnp.array(validation_data[0], dtype=jnp.float32)
-        self.y_val = jnp.array(validation_data[1], dtype=jnp.float32)
+        self.X_val = jnp.array(validation_data[0], dtype=real_dtype())
+        self.y_val = jnp.array(validation_data[1], dtype=real_dtype())
         self.weights = self.y_val[:, -2]
         self.vol_cy = float(jnp.mean(self.weights))
         self.omega = self.y_val[:, -1]
-        self.pullbacks = jnp.array(pullbacks, dtype=jnp.complex64)
+        self.pullbacks = jnp.array(pullbacks, dtype=complex_dtype())
         self.verbose = verbose
         self.hlevel = hlevel
         self.nth = nth
@@ -201,8 +202,8 @@ class SigmaCallback:
             validation_data (tuple): (X_val, y_val).
             initial (bool): If True, run before training. Defaults to False.
         """
-        self.X_val = jnp.array(validation_data[0], dtype=jnp.float32)
-        self.y_val = jnp.array(validation_data[1], dtype=jnp.float32)
+        self.X_val = jnp.array(validation_data[0], dtype=real_dtype())
+        self.y_val = jnp.array(validation_data[1], dtype=real_dtype())
         self.initial = initial
 
     def on_epoch_end(self, epoch, logs=None, model=None):
@@ -242,8 +243,8 @@ class TransitionCallback:
             validation_data (tuple): (X_val, y_val).
             initial (bool): If True, run before training. Defaults to False.
         """
-        self.X_val = jnp.array(validation_data[0], dtype=jnp.float32)
-        self.y_val = jnp.array(validation_data[1], dtype=jnp.float32)
+        self.X_val = jnp.array(validation_data[0], dtype=real_dtype())
+        self.y_val = jnp.array(validation_data[1], dtype=real_dtype())
         self.initial = initial
 
     def on_epoch_end(self, epoch, logs=None, model=None):
@@ -284,8 +285,8 @@ class VolkCallback:
             nfold (int): CY dimension. Defaults to 3.
             initial (bool): If True, run before training. Defaults to False.
         """
-        self.X_val = jnp.array(validation_data[0], dtype=jnp.float32)
-        self.y_val = jnp.array(validation_data[1], dtype=jnp.float32)
+        self.X_val = jnp.array(validation_data[0], dtype=real_dtype())
+        self.y_val = jnp.array(validation_data[1], dtype=real_dtype())
         self.weights = self.y_val[:, -2]
         self.omega = self.y_val[:, -1]
         self.nfold = float(nfold)

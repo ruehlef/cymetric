@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import optax
 import numpy as np
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype
 
 try:
     import tqdm
@@ -17,7 +18,7 @@ except ImportError:
     HAS_TQDM = False
 
 
-def prepare_basis(basis, dtype=jnp.complex64):
+def prepare_basis(basis, dtype=None):
     r"""Casts each numpy array in BASIS to a JAX array of the given dtype.
 
     Equivalent to tensorflow/models/helper.py::prepare_basis.
@@ -25,11 +26,16 @@ def prepare_basis(basis, dtype=jnp.complex64):
     Args:
         basis (dict or str): Dictionary of geometric data or path to a
             pickle file containing such a dictionary.
-        dtype (jax dtype, optional): Target dtype. Defaults to jnp.complex64.
+        dtype (jax dtype, optional): Target dtype. Defaults to complex128
+            when ``jax_enable_x64`` is set and complex64 otherwise.  Resolved
+            at call time, not import time, so enabling x64 after importing
+            this module still takes effect.
 
     Returns:
         dict: same keys, but numpy arrays replaced with JAX arrays.
     """
+    if dtype is None:
+        dtype = complex_dtype()
     if isinstance(basis, str):
         import pickle
         with open(basis, 'rb') as f:
@@ -134,8 +140,8 @@ def train_model(fsmodel, data, optimizer=None, epochs=50,
     if custom_metrics is None:
         custom_metrics = []
 
-    X_train = jnp.array(data['X_train'], dtype=jnp.float32)
-    y_train = jnp.array(data['y_train'], dtype=jnp.float32)
+    X_train = jnp.array(data['X_train'], dtype=real_dtype())
+    y_train = jnp.array(data['y_train'], dtype=real_dtype())
 
     sample_weights = y_train[:, -2] if sw else None
 

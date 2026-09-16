@@ -6,6 +6,7 @@ Uses jax.grad / jax.vmap / jax.jacobian instead of tf.GradientTape.
 """
 import jax
 import jax.numpy as jnp
+from cymetric.jax.models.dtypes import complex_dtype, real_dtype
 
 
 def sigma_measure(model, points, y_true):
@@ -81,7 +82,7 @@ def ricci_measure(model, points, y_true, pullbacks=None, verbose=0):
     def di_dg_single(x_single):
         return jax.grad(log_det_single)(x_single)
 
-    didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(jnp.complex64)
+    didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(complex_dtype())
 
     ricci_ij = (didj_dg[:, :ncoords, :ncoords]
                 + 1j * didj_dg[:, :ncoords, ncoords:]
@@ -146,7 +147,7 @@ def ricci_scalar_fn(model, points, pullbacks=None, verbose=0, rdet=True):
     def di_dg_single(x_single):
         return jax.grad(log_det_single)(x_single)
 
-    didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(jnp.complex64)
+    didj_dg = jax.vmap(jax.jacobian(di_dg_single))(points).astype(complex_dtype())
 
     ricci_ij = (didj_dg[:, :ncoords, :ncoords]
                 + 1j * didj_dg[:, :ncoords, ncoords:]
@@ -222,4 +223,4 @@ def transition_measure_loss(model, points):
     Returns:
         float: mean transition loss.
     """
-    return jnp.mean(model.compute_transition_loss(points.astype(jnp.float32)))
+    return jnp.mean(model.compute_transition_loss(points.astype(real_dtype())))
