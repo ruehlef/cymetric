@@ -348,6 +348,14 @@ class PhiFSModel(FreeModel):
     The NN outputs a scalar phi; the metric correction is computed via
     second-order JAX autodiff (replacing tf.GradientTape nested calls).
     By construction Kähler, so learn_kaehler is disabled.
+
+    .. note::
+        The correction depends on the *second* derivatives of the network,
+        so the activation must be smooth (e.g. ``jax.nn.gelu``, ``jnp.tanh``).
+        A piecewise-linear activation such as ReLU -- the default of
+        ``equinox.nn.MLP`` -- has a Hessian that vanishes almost everywhere,
+        and the model then stays at pure Fubini-Study however long it is
+        trained, while the losses and parameters still appear to change.
     """
 
     def __init__(self, *args, **kwargs):
