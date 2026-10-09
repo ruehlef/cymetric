@@ -65,23 +65,23 @@ def print_installation_info():
     print(f"Compatible frameworks: {', '.join(compatible) if compatible else 'None'}")
     
     if 'torch' in compatible:
-        status = "✓ installed" if framework_available('torch') else "○ will be installed"
+        status = "installed" if framework_available('torch') else "will be installed"
         print(f"PyTorch: {status}")
         
     if 'tensorflow' in compatible:
-        status = "✓ installed" if framework_available('tensorflow') else "○ will be installed"
+        status = "installed" if framework_available('tensorflow') else "will be installed"
         print(f"TensorFlow: {status}")
     else:
-        print("TensorFlow: ✗ not compatible with this Python version")
+        print("TensorFlow: not compatible with this Python version")
 
     if 'jax' in compatible:
-        status = "✓ installed" if framework_available('jax') else "○ will be installed"
+        status = "installed" if framework_available('jax') else "will be installed"
         print(f"JAX (equinox/optax): {status}")
     else:
-        print("JAX: ✗ not compatible with this Python version")
+        print("JAX: not compatible with this Python version")
         
     if not compatible:
-        print("⚠️  Warning: No frameworks compatible. Installing core package only.")
+        print("Warning: No frameworks compatible. Installing core package only.")
 
 if __name__ == "__main__":
     print_installation_info()

@@ -45,7 +45,7 @@ def get_long_description():
 
 def get_smart_requirements():
     """Get requirements based on framework compatibility."""
-    print("\n🔍 Checking framework compatibility...")
+    print("\nChecking framework compatibility...")
     print_installation_info()
     
     core_reqs = get_requirements('requirements-core.txt')
@@ -55,27 +55,27 @@ def get_smart_requirements():
     
     if 'torch' in compatible_frameworks:
         framework_reqs.extend(get_requirements('requirements-torch.txt'))
-        print("📦 Including PyTorch dependencies")
+        print("Including PyTorch dependencies")
     else:
-        print("⚠️  Skipping PyTorch (not compatible with this Python version)")
+        print("Skipping PyTorch (not compatible with this Python version)")
     
     if 'tensorflow' in compatible_frameworks:
         framework_reqs.extend(get_requirements('requirements-tensorflow.txt'))
-        print("📦 Including TensorFlow dependencies")
+        print("Including TensorFlow dependencies")
     else:
-        print("⚠️  Skipping TensorFlow (not compatible with this Python version)")
+        print("Skipping TensorFlow (not compatible with this Python version)")
 
     if 'jax' in compatible_frameworks:
         framework_reqs.extend(get_requirements('requirements-jax.txt'))
-        print("📦 Including JAX dependencies")
+        print("Including JAX dependencies")
     else:
-        print("⚠️  Skipping JAX (not compatible with this Python version)")
+        print("Skipping JAX (not compatible with this Python version)")
     
     if not compatible_frameworks:
-        print("❌ No compatible frameworks found!")
+        print("No compatible frameworks found!")
         print("   Installing core package only. You'll need to manually install PyTorch, TensorFlow, or JAX.")
     
-    print(f"📋 Total requirements: {len(core_reqs + framework_reqs)} packages\n")
+    print(f"Total requirements: {len(core_reqs + framework_reqs)} packages\n")
     return core_reqs + framework_reqs
 
 setup(
