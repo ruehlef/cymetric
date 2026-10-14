@@ -56,12 +56,13 @@ logger = logging.getLogger('pointgen')
 
 
 class PointGenerator:
-    r"""PointGenerator that computes mixture weights over all valid
-    parameter assignments, avoiding degenerate sampling near coverage-deficient
-    loci (see Appendix F of the accompanying thesis).
+    r"""PointGenerator that samples, and weights, the equal mixture over all
+    valid parameter assignments, avoiding degenerate sampling near
+    coverage-deficient loci (see Appendix F of the accompanying thesis).
 
-    ``point_weight`` averages the weight over every assignment in
-    ``self.all_ts`` instead of using a single ``self.selected_t``.
+    ``generate_points`` draws the same number of points with every assignment
+    in ``self.all_ts`` instead of using a single ``self.selected_t``, and
+    ``point_weight`` uses the matching mixture density.
 
     Use this one if you want to generate points and data on a CY given by
     one hypersurface.
@@ -873,18 +874,60 @@ class PointGenerator:
     def generate_points(self, n_p, nproc=-1, batch_size=5000):
         r"""Generates complex points on the CY.
 
-        The points are automatically scaled, such that the largest 
+        Every parameter assignment in ``self.all_ts`` (a random line in one
+        projective factor and a random point in each of the others) contributes
+        the same number of points, so the points follow the mixture density
+        that ``point_weight`` assumes. Each line contributes all of its
+        intersections with Q. With a single projective factor there is just
+        one assignment.
+
+        The points are automatically scaled, such that the largest
         coordinate in each projective space is 1+0.j.
 
         Args:
             n_p (int): # of points.
             nproc (int, optional): # of jobs used. Defaults to -1. Then
                 uses all available resources.
-            batch_size (int, optional): batch_size of Parallel. 
+            batch_size (int, optional): batch_size of Parallel.
                 Defaults to 5000.
 
         Returns:
             ndarray[(n_p, ncoords), np.complex128]: rescaled points
+        """
+        if len(self.all_ts) == 1:
+            return self._generate_tselected_points(n_p, nproc=nproc, batch_size=batch_size)
+
+        n_per_t = int(np.ceil(n_p / len(self.all_ts)))
+        # Save the root-basis state that _generate_root_basis overwrites.
+        orig_t = self.selected_t
+        orig_basis = (self.root_vars, self.root_monomials, self.root_factors, self.tpoly)
+        all_points = []
+        try:
+            for t in self.all_ts:
+                self.selected_t = t
+                self._generate_root_basis()
+                pts = self._generate_tselected_points(n_per_t, nproc=nproc, batch_size=batch_size)
+                # Keep a uniformly random subset of n_per_t points, so that every
+                # assignment contributes the same number.
+                all_points.append(pts[np.random.permutation(len(pts))[:n_per_t]])
+        finally:
+            self.selected_t = orig_t
+            self.root_vars, self.root_monomials, self.root_factors, self.tpoly = orig_basis
+        points = np.concatenate(all_points, axis=0)
+        # Shuffle, so that any subset, such as the train/validation split, is a fair one.
+        return points[np.random.permutation(len(points))]
+
+    def _generate_tselected_points(self, n_p, nproc=-1, batch_size=5000):
+        r"""Generates at least n_p complex points with the parameter assignment
+        ``self.selected_t``, rescaled as in ``generate_points``.
+
+        Args:
+            n_p (int): # of points.
+            nproc (int, optional): # of jobs used. Defaults to -1.
+            batch_size (int, optional): batch_size of Parallel. Defaults to 5000.
+
+        Returns:
+            ndarray[(>=n_p, ncoords), np.complex128]: rescaled points
         """
         max_ts = np.max(self.selected_t)
         max_degree = int(self.ambient[self.selected_t.astype(bool)].item()) + 1
@@ -906,8 +949,6 @@ class PointGenerator:
             points.append(pts)
             _pbar.update(int(max_degree))
         _pbar.close()
-        points = np.vstack(points)
-        return self._rescale_points(points)
         points = np.vstack(points)
         return self._rescale_points(points)
 
