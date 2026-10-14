@@ -6,6 +6,7 @@ Class to call Mathematica point generator.
 """
 import os
 import pickle
+import shutil
 import numpy as np
 import sympy as sp
 import decimal
@@ -22,6 +23,31 @@ from cymetric.pointgen.nphelper import get_levicivita_tensor, prepare_dataset
 import logging
 logger = logging.getLogger('pointgenMathematica')
 logging.basicConfig(format='%(name)s:%(levelname)s:%(message)s')
+
+
+def _resolve_kernel_path(kernel_path):
+    r"""Finds the Wolfram kernel to use.
+
+    An explicit ``kernel_path`` is returned unchanged. Otherwise the kernel is
+    looked up on PATH, which covers installations that wolframclient's own
+    auto-detection misses: it only checks a fixed list of install locations,
+    which on macOS does not include /Applications/Wolfram.app, and on HPC
+    clusters ``module load mathematica`` puts the kernel elsewhere. If PATH has
+    no kernel either, returns None and leaves it to wolframclient.
+
+    Args:
+        kernel_path (str or None): Path to the kernel executable, or None.
+
+    Returns:
+        str or None: The kernel to start.
+    """
+    if kernel_path:
+        return kernel_path
+    for name in ("WolframKernel", "wolfram", "MathKernel"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
 
 
 class PointGeneratorMathematica(CICYPointGenerator):
@@ -81,6 +107,8 @@ class PointGeneratorMathematica(CICYPointGenerator):
                                                  is also used as a frontend
                 selected_t (ndarray[(nProj)]): The ambient spaces from which the points were sampled.
                                                This is only important if Mathematica is also used as a frontend
+                kernel_path (str, optional): Path to the Wolfram kernel executable. If None, the kernel is
+                                             looked up on PATH, and then by wolframclient's auto-detection.
         """
         self.precision = kwargs.get('precision', 10)
         if 'precision' in kwargs.keys():
@@ -172,7 +200,7 @@ class PointGeneratorMathematica(CICYPointGenerator):
             nd.array[(np, ncoord), np.complex128]: complex points on the manifold
         """
         assignments = np.asarray(self.all_ts, dtype=int)
-        with WolframLanguageSession(kernel=self.kernel_path, kernel_loglevel=self.level) as mathematica_session:
+        with WolframLanguageSession(kernel=_resolve_kernel_path(self.kernel_path), kernel_loglevel=self.level) as mathematica_session:
             self.wl_session = mathematica_session
             self._setup_session(mathematica_session)
             self._start_parallel_kernels(mathematica_session, nproc)
@@ -370,7 +398,8 @@ class ToricPointGeneratorMathematica(PointGeneratorMathematica):
                                                   is also used as a frontend
                  selected_t (ndarray[(nProj)]): The ambient spaces from which the points were sampled.
                                                 This is only important if Mathematica is also used as a frontend
-                 kernel_path (str, optional): Path to the Wolfram kernel executable. If None, uses default kernel.
+                 kernel_path (str, optional): Path to the Wolfram kernel executable. If None, the kernel is
+                                              looked up on PATH, and then by wolframclient's auto-detection.
          """
         self.toric_data = toric_data
         self.nfold = toric_data['dim_cy']
@@ -451,7 +480,7 @@ class ToricPointGeneratorMathematica(PointGeneratorMathematica):
         Returns:
             nd.array[(np, ncoord), np.complex128]: [description]
         """
-        with WolframLanguageSession(kernel=self.kernel_path, kernel_loglevel=self.level) as mathematica_session:
+        with WolframLanguageSession(kernel=_resolve_kernel_path(self.kernel_path), kernel_loglevel=self.level) as mathematica_session:
             self.wl_session = mathematica_session
             self._setup_session(mathematica_session)
             self._start_parallel_kernels(mathematica_session, nproc)

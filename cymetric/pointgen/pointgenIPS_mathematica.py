@@ -28,7 +28,6 @@ import json
 import logging
 import os
 import pickle
-import shutil
 import sys
 from pathlib import Path
 from typing import Optional, Union
@@ -44,6 +43,7 @@ from wolframclient.serializers import export as wlexport
 from cymetric.pointgen.pointgen_mathematica import (
     ComplexFunctionConsumer,
     PointGeneratorMathematica,
+    _resolve_kernel_path,
 )
 
 
@@ -58,25 +58,6 @@ if not logger.handlers:
     logger.addHandler(_h)
     logger.setLevel(logging.INFO)
     logger.propagate = False
-
-
-def _resolve_kernel_path(explicit_path: Optional[str]) -> Optional[str]:
-    """Find a Wolfram kernel binary.
-
-    wolframclient's auto-detection only searches a hardcoded list of install
-    locations; on HPC with ``module load mathematica`` the binary lives
-    elsewhere on PATH. Resolve via ``shutil.which`` first so module-loaded
-    installations work without an explicit ``kernel_path``; if that finds
-    nothing, return None and leave it to wolframclient's auto-detection, as
-    ``PointGeneratorMathematica`` does.
-    """
-    if explicit_path:
-        return explicit_path
-    for name in ("WolframKernel", "wolfram", "MathKernel"):
-        p = shutil.which(name)
-        if p:
-            return p
-    return None
 
 
 # --------------------------------------------------------------------------
