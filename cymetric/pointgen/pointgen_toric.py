@@ -111,6 +111,10 @@ class ToricPointGenerator(PointGenerator):
         # HACK: We use self.selected_t differently to CICY pointgen
         # self.ambient is not used other than in point_weight.
         self.ambient = 2*self.selected_t
+        # generate_points samples with selected_t alone, and the ambient hack
+        # above only gives the right density for that assignment, so the
+        # weights must use it alone (as in ToricPointGeneratorMathematica).
+        self.all_ts = self.selected_t[None, :]
         self.vol_j_norm = toric_data['vol_j_norm']
 
     def _generate_all_bases(self):
