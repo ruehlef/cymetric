@@ -126,6 +126,9 @@ class CICYPointGenerator(PointGenerator):
         self.lc = get_levicivita_tensor(int(self.nfold))
         self._generate_all_bases()
         self.intersection_tensor = self._generate_intersection_tensor()
+        # Keep only the assignments whose random linear subspaces meet X (d_t > 0);
+        # the others give no points, and the mixture weights divide by d_t.
+        self.all_ts = self.all_ts[[self._assignment_degree(t) > 0 for t in self.all_ts]]
         self.vol_j_norm = self.get_volume_from_intersections(np.ones_like(self.kmoduli)) if vol_j_norm is None else vol_j_norm
         
 

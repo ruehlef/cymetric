@@ -1195,27 +1195,75 @@ class PointGenerator:
                          'Run the tensorcontraction yourself :).')
             return np.ones(len(points))
 
+    def _assignment_degree(self, assignment):
+        r"""Number of points in which X meets one random linear subspace of the
+        given parameter assignment.
+
+        Sampling with ``assignment`` (t_1,...,t_F) intersects X with a random
+        P^{t_j} in every P^{n_j}, which gives
+
+        .. math:: d_t = \int_X \prod_j J_j^{n_j - t_j}
+
+        points, the intersection number of the ``ambient - assignment``
+        directions. The density det g_t of ``_compute_detg_for_assignment``
+        integrates to d_t times a factor that is the same for all assignments.
+
+        Args:
+            assignment (ndarray([nProj], int)): numParamsInPn assignment.
+
+        Returns:
+            float: d_t.
+        """
+        idx = [j for j, n in enumerate(self.ambient - np.asarray(assignment)) for _ in range(int(n))]
+        return float(self.intersection_tensor[tuple(idx)])
+
+    def _mixture_detg(self, points, pbs, assignments):
+        r"""Density of the points when every assignment contributes the same
+        number of them, up to an overall constant.
+
+        Assignment t_m samples with density det g_m / Z_m, where Z_m is
+        proportional to d_m (see ``_assignment_degree``). The equal mixture is
+        therefore proportional to
+
+        .. math:: \sum_m c_m \det g_m, \qquad c_m = \frac{1/d_m}{\sum_k 1/d_k}.
+
+        The c_m sum to one, so this is det g for a single assignment and the
+        plain mean of the det g_m when all d_m agree.
+
+        Args:
+            points (ndarray([n_p, ncoords], complex)): Points.
+            pbs (ndarray([n_p, nfold, ncoords], complex)): Pullback tensors.
+            assignments (ndarray([M, nProj], int)): The assignments.
+
+        Returns:
+            ndarray([n_p], float): mixture density.
+        """
+        detg = np.array([self._compute_detg_for_assignment(points, pbs, np.asarray(t, dtype=int))
+                         for t in assignments])
+        if len(assignments) == 1:
+            return detg[0]
+        c = np.array([1. / self._assignment_degree(t) for t in assignments])
+        return np.einsum('m,mx->x', c / np.sum(c), detg)
+
     def point_weight(self, points, normalize_to_vol_j=True, j_elim=None):
-        r"""Mixture weight: averages over all valid parameter assignments.
+        r"""Mixture weight over the parameter assignments in ``self.all_ts``.
 
-        For each assignment t_m in ``self.all_ts``, the sampling weight is
-
-        .. math::
-
-            w_m(p) = \frac{|\Omega(p)|^2}{\det g_m(p)}
-
-        where :math:`\det g_m` is the antisymmetric wedge product of the
-        Fubini-Study metrics pulled back to X using the complement directions
-        ``ambient - t_m``.  Since ``generate_points`` draws an equal share of
-        points with every assignment, the points follow the mixture of the M
-        sampling densities, so the weight is the inverse of the mixture density
+        Sampling with assignment t_m gives points with density proportional to
+        :math:`\det g_m`, the antisymmetric wedge product of the Fubini-Study
+        metrics pulled back to X along the complement directions
+        ``ambient - t_m``, whose integral is proportional to the number d_m of
+        points per random linear subspace (see ``_assignment_degree``). For
+        points drawn with the same number per assignment, the weight is the
+        inverse of the mixture density (see ``_mixture_detg``),
 
         .. math::
 
-            w(p) = \frac{|\Omega(p)|^2}{\frac{1}{M} \sum_{m=1}^M \det g_m(p)},
+            w(p) = \frac{|\Omega(p)|^2}{\sum_m c_m \det g_m(p)}, \qquad
+            c_m = \frac{1/d_m}{\sum_k 1/d_k},
 
-        not the mean of the w_m.  This keeps every ambient factor covered and
-        stays finite where a single assignment's density vanishes.
+        not the mean of the per-assignment weights. This keeps every ambient
+        factor covered and stays finite where a single assignment's density
+        vanishes.
 
         Args:
             points (ndarray([n_p, ncoords], np.complex128)): Points.
@@ -1237,24 +1285,18 @@ class PointGenerator:
         pbs = self.pullbacks(points, j_elim=j_elim)
         omega_squared = np.real(omegas * np.conj(omegas))
 
-        all_detg = np.array([
-            self._compute_detg_for_assignment(points, pbs, t)
-            for t in self.all_ts
-        ])  # shape [M, n_p]
-        # Correct mixture weight: |Ω|² / mean_m(det g_m).
-        # Using the arithmetic mean in the *denominator* ensures that when one
-        # det(g_m) is small (near a singularity of that assignment), the other
-        # M-1 healthy terms keep the denominator away from zero.  The previous
-        # formula mean_m(|Ω|²/det g_m) is the arithmetic mean of reciprocals,
-        # which by Jensen blows up whenever *any* single det(g_m) is small.
-        mean_detg = np.mean(all_detg, axis=0)  # shape [n_p]
-        weight = np.real(omega_squared / mean_detg)
+        # The mixture density goes in the *denominator*: where one det(g_m) is
+        # small (near a singularity of that assignment), the other terms keep it
+        # away from zero, whereas the mean of the per-assignment weights
+        # |Ω|²/det g_m blows up whenever any single det(g_m) is small.
+        mixture_detg = self._mixture_detg(points, pbs, self.all_ts)  # shape [n_p]
+        weight = np.real(omega_squared / mixture_detg)
 
         if normalize_to_vol_j:
             fs_ref = self.fubini_study_metrics(points, vol_js=np.ones_like(self.kmoduli))
             fs_ref_pb = np.einsum('xai,xij,xbj->xab', pbs, fs_ref, np.conj(pbs))
             det_ref = np.real(np.linalg.det(fs_ref_pb))
-            mean_ratio = np.mean(det_ref / mean_detg)
+            mean_ratio = np.mean(det_ref / mixture_detg)
             norm_fac = self.vol_j_norm / mean_ratio
             weight = norm_fac * weight
         return weight

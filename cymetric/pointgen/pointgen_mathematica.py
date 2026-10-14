@@ -28,10 +28,12 @@ class PointGeneratorMathematica(CICYPointGenerator):
     r"""PointGeneratorMathematica class.
 
     Uses
-    PointGeneratorMathematica.m as the backend.  The Mathematica file samples
-    with a single parameter assignment (numParamsInPn) and returns it, and the
-    weights use that assignment.  Points loaded from ``point_file_path`` must
-    come with the assignment they were drawn with, passed as ``selected_t``.
+    PointGeneratorMathematica.m as the backend.  Like CICYPointGenerator, it
+    samples the same number of points with every valid parameter assignment
+    (numParamsInPn) in ``self.all_ts``, or only with ``selected_t`` if one is
+    given, and weights them with the corresponding mixture density.  Points
+    loaded from ``point_file_path`` must come with the single assignment they
+    were drawn with, passed as ``selected_t``.
 
     This uses mathematica as a backand to carry out the computations
 
@@ -96,25 +98,22 @@ class PointGeneratorMathematica(CICYPointGenerator):
         super(PointGeneratorMathematica, self).__init__(*args, **kwargs)
         self.kernel_path = kernel_path
 
-        # GeneratePointsM samples with a single parameter assignment and returns
-        # it. Points loaded from point_file_path were drawn with the assignment
-        # passed in as selected_t, so the weights must use that one alone, not
-        # the mixture over every valid assignment that CICYPointGenerator set up
-        # in self.all_ts. Without selected_t, generate_points sets both once
-        # Mathematica has reported its choice.
+        # self.all_ts holds the assignments the points are drawn with and the
+        # weights average over: every valid one by default (CICYPointGenerator
+        # set them up), or only selected_t if given. Points loaded from
+        # point_file_path were drawn with the single assignment passed as
+        # selected_t, so the weights must use that one alone.
         if selected_t is not None:
             self.selected_t = np.asarray(selected_t, dtype=int)
             self.all_ts = self.selected_t[None, :]
         else:
             self.selected_t = np.zeros((len(self.ambient)), dtype=int)
-        # all_assignments is populated by generate_points() once Mathematica returns
-        # the full list of valid numParamsInPn vectors.  Until then it is None and
-        # point_weight falls back to self.all_ts (Python-computed valid assignments).
+        # Subclasses that track their assignment separately (the toric
+        # generator) set this; point_weight then uses it instead of self.all_ts.
         self.all_assignments = None
-        # point_assignment_indices[i] is the 0-based index into all_assignments for
-        # point i.  Populated by generate_points(); used by point_weight for
-        # per-assignment weighting (each point gets the det(g_m) matching the
-        # assignment that generated it, giving single-assignment variance).
+        # point_assignment_indices[i] is the index into self.all_ts of the
+        # assignment point i was drawn with. Set by generate_points; for
+        # information only, the weights use the mixture over all of them.
         self.point_assignment_indices = None
         
         self.verbose = kwargs.get('verbose', 1)
@@ -158,7 +157,12 @@ class PointGeneratorMathematica(CICYPointGenerator):
         logger.debug("Running with " + str(max(1, mathematica_session.evaluate(wlexpr('Length[Kernels[]]')))) + " Mathematica kernels.")
     
     def generate_points(self, n_p, nproc=-1, **kwargs):
-        r"""Generates complex points by calling the mathematica point generator
+        r"""Generates complex points by calling the mathematica point generator.
+
+        As in CICYPointGenerator, every assignment in ``self.all_ts`` contributes
+        the same number of points, and the points are shuffled. Mathematica keeps
+        all intersection points of each random linear subspace, so every
+        assignment samples exactly its Shiffman-Zelditch density.
 
         Args:
             n_p (int): # of points
@@ -167,6 +171,7 @@ class PointGeneratorMathematica(CICYPointGenerator):
         Returns:
             nd.array[(np, ncoord), np.complex128]: complex points on the manifold
         """
+        assignments = np.asarray(self.all_ts, dtype=int)
         with WolframLanguageSession(kernel=self.kernel_path, kernel_loglevel=self.level) as mathematica_session:
             self.wl_session = mathematica_session
             self._setup_session(mathematica_session)
@@ -179,50 +184,60 @@ class PointGeneratorMathematica(CICYPointGenerator):
             # specifying the consumer in the session with WolframLanguageSession(consumer=ComplexFunctionConsumer()) seems to not work as of wolframclient version 1.1.6
             # so we need to deserialize the object without a consumer, serialize it to an wxf expression, and deserialize that with a consumer
 
-            # compute and deserialize the points
-            pts = get_points_mathematica(n_p, self.ambient.tolist(), [x.tolist() for x in self.coefficients], [x.tolist() for x in self.monomials], self.precision, max(0, 3 - self.verbose), False)
+            # compute and deserialize the points: with a list of assignments,
+            # GeneratePointsM returns {points, 1-based assignment of each point,
+            # average points per intersection for each assignment}
+            pts = get_points_mathematica(n_p, self.ambient.tolist(), [x.tolist() for x in self.coefficients], [x.tolist() for x in self.monomials], self.precision, max(0, 3 - self.verbose), False, assignments.tolist())
             # serialize again to wxf
             pts = wlexport(pts, target_format='wxf')
             # deserialize converting Mathamtica complex numbers to python complex numbers
             pts = binary_deserialize(pts, consumer=ComplexFunctionConsumer())
-        
-        # pts[1] is the single numParamsInPn assignment vector used by Mathematica.
-        self.selected_t = np.array(pts[1], dtype=int)
-        self.all_ts = np.array([self.selected_t])
-        self.point_assignment_indices = None
 
-        # Filter out empty points that result from timeouts
-        points = pts[0]
-        if isinstance(points, list):
-            # Remove empty sublists that result from timeout failures
-            points = [p for p in points if p and len(p) > 0]
-            if not points:
-                raise ValueError("No valid points generated - all attempts resulted in timeouts")
+        # Drop anything that is not a complete point (e.g. from a failed solve).
+        valid = [isinstance(p, (list, tuple)) and len(p) == self.ncoords for p in pts[0]]
+        points = np.array([p for p, v in zip(pts[0], valid) if v], dtype=np.complex128)
+        labels = np.array([l for l, v in zip(pts[1], valid) if v], dtype=int) - 1
+        if len(points) == 0:
+            raise ValueError("No valid points generated.")
 
-        return np.array(points)
+        # Each random subspace must contribute all d_m of its intersection points,
+        # otherwise the sampling density is not the one the weights assume.
+        for t, roots in zip(assignments, pts[2]):
+            d = self._assignment_degree(t)
+            if roots > 0 and not np.isclose(roots, d, rtol=1e-2):
+                logger.warning("Assignment {} gave {:.3f} points per intersection instead of {:g}; "
+                               "its points are not sampled with the density the weights assume.".format(t.tolist(), roots, d))
+        counts = np.bincount(labels, minlength=len(assignments))
+        used = counts > 0
+        if not np.all(used):
+            logger.warning("No points for the assignments {}; they are left out of the weights.".format(
+                assignments[~used].tolist()))
+        if len(set(counts[used])) > 1:
+            logger.warning("The assignments contributed unequal numbers of points {}; the weights "
+                           "assume equal shares.".format(counts[used].tolist()))
+        self.all_ts = assignments[used]
+        labels = (np.cumsum(used) - 1)[labels]
+
+        # The points come grouped by assignment; shuffle them (as CICYPointGenerator
+        # does) so that any subset, such as the train/validation split, is a fair one.
+        perm = np.random.permutation(len(points))
+        self.point_assignment_indices = labels[perm][:n_p]
+        return points[perm][:n_p]
 
     def point_weight(self, points, normalize_to_vol_j=True, j_elim=None):
-        r"""Per-assignment weight using valid assignments returned by Mathematica.
+        r"""Mixture weight over the assignments the points were drawn with.
 
-        When ``generate_points`` has been called and ``self.point_assignment_indices``
-        is available (and matches ``len(points)``), each point is weighted by the
-        single-assignment formula using the assignment that generated it:
+        Same as ``PointGenerator.point_weight``: with the same number of points
+        per assignment, the weight is
 
         .. math::
 
-            w(p_i) = \frac{|\Omega(p_i)|^2}{\det g_{m_i}(p_i)}
+            w(p) = \frac{|\Omega(p)|^2}{\sum_m c_m \det g_m(p)}, \qquad
+            c_m = \frac{1/d_m}{\sum_k 1/d_k},
 
-        where :math:`m_i` is the assignment index stored in
-        ``self.point_assignment_indices[i]``.  This gives the same variance as
-        the original single-assignment approach (~2.8 std/mean on the
-        tetra-quadric) while distributing points across all M valid assignments
-        so every ambient factor is covered.
-
-        Without per-point indices, ``det g`` is averaged over the assignments
-        the points were drawn from: ``self.all_assignments`` if set, otherwise
-        ``self.all_ts``. For points from GeneratePointsM, and for points loaded
-        with ``selected_t``, that is a single assignment, so this is exactly its
-        own weight.
+        over ``self.all_assignments`` if a subclass set it, otherwise over
+        ``self.all_ts``. For points loaded with ``selected_t``, that is a single
+        assignment, so this is exactly its own weight.
 
         Args:
             points (ndarray([n_p, ncoords], np.complex128)): Points.
@@ -237,24 +252,7 @@ class PointGeneratorMathematica(CICYPointGenerator):
         pbs = self.pullbacks(points, j_elim=j_elim)
         omega_squared = np.real(omegas * np.conj(omegas))
 
-        # Build the [M, n_p] array of per-assignment det(g_m) values.
-        all_detg = np.array([
-            self._compute_detg_for_assignment(points, pbs, np.asarray(t, dtype=int))
-            for t in assignments
-        ])  # shape [M, n_p]
-
-        use_per_assignment = (
-            self.point_assignment_indices is not None
-            and len(self.point_assignment_indices) == len(points)
-        )
-        if use_per_assignment:
-            # Each point uses the det(g_m) for the assignment that generated it.
-            # This preserves single-assignment variance while covering all factors.
-            weight_detg = all_detg[self.point_assignment_indices, np.arange(len(points))]
-        else:
-            # Fallback: arithmetic mean of densities across all assignments.
-            weight_detg = np.mean(all_detg, axis=0)
-
+        weight_detg = self._mixture_detg(points, pbs, assignments)
         weight = np.real(omega_squared / weight_detg)
 
         if normalize_to_vol_j:
@@ -290,8 +288,7 @@ class PointGeneratorMathematica(CICYPointGenerator):
             inv_one_mask = np.isclose(points, complex(1, 0))
             good_indices = np.where(np.sum(inv_one_mask, -1) == len(self.kmoduli))
             points = points[good_indices]
-            # Keep assignment indices in sync with filtered points so per-assignment
-            # weighting continues to work in point_weight.
+            # Keep the assignment indices in sync with the filtered points.
             if (self.point_assignment_indices is not None
                     and len(self.point_assignment_indices) == len(inv_one_mask)):
                 self.point_assignment_indices = self.point_assignment_indices[good_indices]

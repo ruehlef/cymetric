@@ -39,7 +39,58 @@ absPts=Abs[pts];
     Return[pts];
     )];
 
-GeneratePointsM[numPts_, dimPs_, coefficients_, exponents_, precision_:20,verbose_:0,frontEnd_:False]:=Module[{varsUnflat,vars,eqns,i,j,conf,start,col,totalDeg,numParamsInPn,numPoints,ptsPartition,params,low,pointsOnSphere,pointsOnCY,numPtsPerSample},( 
+GeneratePointsForAssignmentM[numPts_,numParamsInPn_,varsUnflat_,dimPs_,eqns_,precision_,verbose_,frontEnd_]:=Module[{i,j,trial,params,pointsOnSphere,pointsOnCY,numPoints,numPtsPerSample,low,high},(
+PrintMsg["Number of Parameters per P^n: "<>ToString[numParamsInPn],frontEnd,verbose];
+Clear[t];
+params=Table[Join[{1},Table[Subscript[t,j,k],{k,numParamsInPn[[j]]}]],{j,Length[numParamsInPn]}];
+(*Do one trial run to find how many points you get from one intersection*)
+numPtsPerSample=0;
+For[trial=1,trial<=5&&numPtsPerSample==0,trial++,
+pointsOnSphere=Table[SamplePointsOnSphere[dimPs[[i]]+1,numParamsInPn[[i]]+1],{i,Length[dimPs]}];
+numPtsPerSample=Length[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,pointsOnSphere,eqns,precision]];
+];
+If[numPtsPerSample==0,
+PrintMsg["No points on the CY for "<>ToString[numParamsInPn]<>" parameters per P^n.",frontEnd,1];
+Return[{{},0}];
+];
+PrintMsg["Number of points on CY from one ambient space intersection: "<>ToString[numPtsPerSample],frontEnd,verbose];
+
+(*Now generate as many points as needed*)
+numPoints=Ceiling[numPts/numPtsPerSample];
+PrintMsg["Now generating "<>ToString[numPts]<>" points...",frontEnd,verbose];
+pointsOnSphere=ParallelTable[SamplePointsOnSphere[dimPs[[i]]+1,numPoints (numParamsInPn[[i]]+1)],{i,Length[dimPs]},DistributedContexts->Automatic];
+
+(*Create system of equations and solve it to find points on CY. Chunk j covers the intersections Floor[(j-1) numPoints/20]+1 to Floor[j numPoints/20], so every one is used exactly once*)
+If[frontEnd,
+    pointsOnCY={};
+    Monitor[
+    For[j=1,j<=20,j++,
+    low=Floor[(j-1) numPoints/20]+1;
+    high=Floor[j numPoints/20];
+    pointsOnCY=Join[pointsOnCY,ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,low,high},DistributedContexts->Automatic]];
+    ];
+    ,Row[{ProgressIndicator[5(j-1),{1,100}],ToString[5 (j-1)]<>"/100"},"   "]
+   ];
+    ,
+    If[numPoints<=20*numPtsPerSample,
+    pointsOnCY=ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,numPoints},DistributedContexts->Automatic];
+    ,
+    (*Partition in order to provide progress feedback (WolframClient Library ignores messages from subkernels spawned from the kernel used in wl.evaluate(). This negatively impacts performance)*)
+    pointsOnCY={};
+    For[j=1,j<=20,j++,
+    PrintMsg["Generated "<>ToString[5 (j-1)]<>"% of points",frontEnd,verbose];
+    low=Floor[(j-1) numPoints/20]+1;
+    high=Floor[j numPoints/20];
+    pointsOnCY=Join[pointsOnCY,ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,low,high},DistributedContexts->Automatic]];
+    ];
+    ];
+];
+PrintMsg["done.",frontEnd,verbose];
+pointsOnCY=Flatten[pointsOnCY,1];
+Return[{pointsOnCY,N[Length[pointsOnCY]/numPoints]}];
+)];
+
+GeneratePointsM[numPts_, dimPs_, coefficients_, exponents_, precision_:20,verbose_:0,frontEnd_:False,assignments_:Automatic]:=Module[{varsUnflat,vars,eqns,i,j,conf,start,col,totalDeg,numParamsInPn,numPerAssignment,res,pointsOnCY,labels,rootsPerIntersection},(
     varsUnflat=Table[Subscript[x, i, a], {i, Length[dimPs]}, {a, 0, dimPs[[i]]}];
     vars=Flatten[varsUnflat];
     (*Reconstruct equations*)
@@ -58,7 +109,25 @@ AppendTo[col,totalDeg];
 AppendTo[conf, col];
 ];
 PrintMsg["Configuration matrix: "<>ToString[Transpose[conf]],frontEnd,verbose];
-    (*Find lowest degree in each equation while ensuring that each equation gets at least one parameter*)
+
+(*With a list of parameter assignments (numParamsInPn vectors), sample the same number of points with each of them, so that the points follow the equal mixture of their sampling distributions. Returns the points, the (1-based) assignment each point was drawn with, and the average number of points per ambient space intersection for each assignment*)
+If[assignments=!=Automatic,
+numPerAssignment=Ceiling[numPts/Length[assignments]];
+pointsOnCY={};
+labels={};
+rootsPerIntersection={};
+For[i=1,i<=Length[assignments],i++,
+res=GeneratePointsForAssignmentM[numPerAssignment,assignments[[i]],varsUnflat,dimPs,eqns,precision,verbose,frontEnd];
+AppendTo[rootsPerIntersection,res[[2]]];
+(*Keep a uniformly random subset of numPerAssignment points, so that every assignment contributes the same number*)
+res=If[Length[res[[1]]]>numPerAssignment,RandomSample[res[[1]],numPerAssignment],res[[1]]];
+pointsOnCY=Join[pointsOnCY,res];
+labels=Join[labels,ConstantArray[i,Length[res]]];
+];
+Return[{pointsOnCY,labels,rootsPerIntersection}];
+];
+
+    (*Otherwise use a single assignment. Find lowest degree in each equation while ensuring that each equation gets at least one parameter*)
     (*Need to get points upon intersection with equations, i.e. we need as many parameters as equations*)
     (*We want the degree in the parameters to be as small as possible, while at the same time ensuring that each equation has at least one parameter such that it can be solved. Instead of finding the optimal configuration for this, we content ourselfs with finding a good one (which can be found much faster)*)
     (*In a first pass, make sure that each equation gets a parameter*)
@@ -88,7 +157,7 @@ While[Length[eqns]<Plus@@numParamsInPn,
 	];
     ];
 ];
-     
+
 (*Finally, we make sure that there are at most n parameters in each P^n*)
 i=1;
 While[i<=Length[numParamsInPn],
@@ -102,58 +171,7 @@ Continue[];
 ];
 i++;
 ];
-PrintMsg["Number of Parameters per P^n: "<>ToString[numParamsInPn],frontEnd,verbose];
-    
-(*Generate points on CY. Do one trial run to find how many points you get from one intersection *)
-numPoints=1;
-Clear[t];
-params=Table[Join[{1},Table[Subscript[t,j,k],{k,numParamsInPn[[j]]}]],{j,Length[numParamsInPn]}];
-pointsOnSphere=ParallelTable[SamplePointsOnSphere[dimPs[[i]]+1,numPoints (numParamsInPn[[i]]+1)],{i,Length[dimPs]},DistributedContexts->Automatic];
-
-(*Create system of equations and solve it to find points on CY*)
-pointsOnCY=ParallelTable[getPointsOnCY[varsUnflat, numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns,precision],{p,numPoints},DistributedContexts->Automatic];
-pointsOnCY=Flatten[pointsOnCY,1];
-numPtsPerSample=Length[pointsOnCY];
-PrintMsg["Number of points on CY from one ambient space intersection: "<>ToString[numPtsPerSample],frontEnd,verbose];
-    
-(*Now generate as many points as needed*)
-numPoints=Ceiling[numPts/numPtsPerSample];
-PrintMsg["Now generating "<>ToString[numPts]<>" points...",frontEnd,verbose];
-
-Clear[x,t];
-varsUnflat=Table[Subscript[x,i,a],{i,Length[dimPs]},{a,0,dimPs[[i]]}];
-params=Table[Join[{1},Table[Subscript[t,j,k],{k,numParamsInPn[[j]]}]],{j,Length[numParamsInPn]}];
-pointsOnSphere=ParallelTable[SamplePointsOnSphere[dimPs[[i]]+1,numPoints (numParamsInPn[[i]]+1)],{i,Length[dimPs]},DistributedContexts->Automatic];
-    
-(*Create system of equations and solve it to find points on CY*)
-If[frontEnd,
-    (*pointsOnCY=ResourceFunction["MonitorProgress"][ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,numPoints},DistributedContexts->Automatic]];*)
-    pointsOnCY={};
-    low=1;
-    Monitor[
-    For[j=1,j<=20,j++,
-    pointsOnCY=Join[pointsOnCY,ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,low, Floor[j numPoints/20]},DistributedContexts->Automatic]];
-    low +=Floor[numPoints/20];
-    ];
-    ,Row[{ProgressIndicator[5(j-1),{1,100}],ToString[5 (j-1)]<>"/100"},"   "]
-   ];
-    ,
-    If[numPoints<=20*numPtsPerSample,
-    pointsOnCY=ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,numPoints},DistributedContexts->Automatic];
-    ,
-    (*Partition in order to provide progress feedback (WolframClient Library ignores messages from subkernels spawned from the kernel used in wl.evaluate(). This negatively impacts performance)*)
-    pointsOnCY={};
-    low=1;
-    For[j=1,j<=20,j++,
-    PrintMsg["Generated "<>ToString[5 (j-1)]<>"% of points",frontEnd,verbose];
-    pointsOnCY=Join[pointsOnCY,ParallelTable[getPointsOnCY[varsUnflat,numParamsInPn,dimPs,params,Table[pointsOnSphere[[i,p+(b-1) numPoints]],{i,Length[pointsOnSphere]},{b,1+numParamsInPn[[i]]}],eqns],{p,low, Floor[j numPoints/20]},DistributedContexts->Automatic]];
-    low = Floor[j numPoints/20];
-    ];
-    ];
-];
-PrintMsg["done.",frontEnd,verbose];
-pointsOnCY=Flatten[pointsOnCY,1];
-Return[{pointsOnCY,numParamsInPn}];
+Return[{GeneratePointsForAssignmentM[numPts,numParamsInPn,varsUnflat,dimPs,eqns,precision,verbose,frontEnd][[1]],numParamsInPn}];
 )];
 
 GetPointsOnCYToric[dimCY_,CYEqn_,vars_,sections_,patchMasks_,sectionCoords_,sectionMonoms_,GLSMcharges_,precision_]:=Module[{a,i,j,k,l,eq,dimPs,numEqnsInPn,coeffs,newEqn,sectionSol,sectionCoordsFlat,expMatrix,expMatrixPinv,sVals,logS,logX,xVals,toricVarSols,pts,patchConstraints,patchCoordsList,patchMats,patchMatInverses,patchCoords,logLambda,lambdas,scalings,tmpPts,timeoutResult,validIdx},(
