@@ -1206,13 +1206,16 @@ class PointGenerator:
 
         where :math:`\det g_m` is the antisymmetric wedge product of the
         Fubini-Study metrics pulled back to X using the complement directions
-        ``ambient - t_m``.  The returned weight is the average
+        ``ambient - t_m``.  Since ``generate_points`` draws an equal share of
+        points with every assignment, the points follow the mixture of the M
+        sampling densities, so the weight is the inverse of the mixture density
 
         .. math::
 
-            w(p) = \frac{1}{M} \sum_{m=1}^M w_m(p)
+            w(p) = \frac{|\Omega(p)|^2}{\frac{1}{M} \sum_{m=1}^M \det g_m(p)},
 
-        so that no ambient factor is systematically excluded.
+        not the mean of the w_m.  This keeps every ambient factor covered and
+        stays finite where a single assignment's density vanishes.
 
         Args:
             points (ndarray([n_p, ncoords], np.complex128)): Points.
@@ -1223,7 +1226,7 @@ class PointGenerator:
                     \int_X \det(g) &= \sum_i \det(g) \cdot w|_{x_i}\\
                                 &= d^{ijk} t_i t_j t_k.
 
-                Defaults to False.
+                Defaults to True.
             j_elim (ndarray([n_p, nhyper], np.int64)): Index to be eliminated.
                 Defaults to None. If None eliminates max(dQdz).
 

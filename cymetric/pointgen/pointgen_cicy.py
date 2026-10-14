@@ -6,6 +6,7 @@ CICY PointGenerator.
 """
 
 import numpy as np
+import itertools as it
 import logging
 import sympy as sp
 from sympy.geometry.util import idiff
@@ -557,21 +558,48 @@ class CICYPointGenerator(PointGenerator):
         return 1 / np.linalg.det(omega)
 
     def _find_max_dQ_coords(self, points):
-        r"""finds the coordinates for which |dQ/dzj| is largest.
+        r"""Finds the coordinates to eliminate in the pullbacks.
+
+        For one hypersurface, |det B| = |dQ/dz_j|, so the coordinate with the
+        largest |dQ/dz_j| is optimal. For several, the nhyper coordinates are
+        chosen jointly to maximize |det B| with B_ij = dQ_i/dz_{e_j}: picking
+        each equation's largest derivative in turn maximizes the diagonal of B
+        but not its determinant, and an ill-conditioned B makes Omega = 1/det(B)
+        and the pullbacks blow up. The weights |Omega|^2/det(g_pb) do not depend
+        on the choice, but Omega and the pullbacks on their own do, and the loss
+        pairs a model's det(g) with a dataset's |Omega|^2 point by point. So
+        point generators and models must use exactly the same rule: subsets are
+        scanned in lexicographic order and the first maximum wins, identically
+        in every backend and in the IPS sampler.
 
         Args:
             points (ndarray[(n_p, ncoords), np.complex128]): Points.
 
         Returns:
-            ndarray[(n_p, nhyper), np.int64]: maxdQdz indices
+            ndarray[(n_p, nhyper), np.int32]: Coordinates to eliminate.
         """
         available_mask = ~np.isclose(points, complex(1, 0))
-        max_coords = np.zeros((len(points), self.nhyper), dtype=np.int32)
-        for i in range(self.nhyper):
-            dQdz = np.abs(self._compute_dQdz(points, i))
-            max_coords[:, i] = np.argmax(dQdz * available_mask, axis=-1)
-            available_mask[np.arange(len(points)), max_coords[:, i]] = False
-        return max_coords
+        if self.nhyper == 1:
+            dQdz = np.abs(self._compute_dQdz(points, 0))
+            return np.argmax(dQdz * available_mask, axis=-1)[:, None].astype(np.int32)
+        dQdz = np.stack([self._compute_dQdz(points, i) for i in range(self.nhyper)],
+                        axis=1)                                   # (n_p, k, ncoords)
+        subsets = np.array(list(it.combinations(range(self.ncoords), self.nhyper)))
+        n_p = len(points)
+        best_det = np.full(n_p, -1.0)
+        best_idx = np.zeros(n_p, dtype=np.int64)
+        for c0 in range(0, len(subsets), 64):
+            sub = subsets[c0:c0 + 64]                             # (s, k)
+            B = np.transpose(dQdz[:, :, sub], (0, 2, 1, 3))      # (n_p, s, k, k)
+            absdet = np.abs(np.linalg.det(B))
+            absdet = np.where(np.all(available_mask[:, sub], axis=-1), absdet, -1.0)
+            loc = np.argmax(absdet, axis=1)
+            val = absdet[np.arange(n_p), loc]
+            # strictly greater: the earlier (lexicographically smaller) subset wins ties
+            update = val > best_det
+            best_det = np.where(update, val, best_det)
+            best_idx = np.where(update, c0 + loc, best_idx)
+        return subsets[best_idx].astype(np.int32)
 
     def _find_good_coordinate_mask(self, points):
         r"""Computes a mask for points with True

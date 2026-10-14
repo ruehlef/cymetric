@@ -330,33 +330,52 @@ class FSModel(eqx.Module):
 
     @eqx.filter_jit
     def _find_max_dQ_coords(self, points):
-        r"""Finds for each point the coordinate with largest |dQ/dz|.
+        r"""Finds the coordinates to eliminate in the pullbacks.
 
-        Equivalent to FSModel._find_max_dQ_coords in TF.
+        For one hypersurface, |det B| = |dQ/dz_j|, so the coordinate with the
+        largest |dQ/dz_j| is optimal. For several, the nhyper coordinates are
+        chosen jointly to maximize |det B| with B_ij = dQ_i/dz_(e_j): picking
+        each equation's largest derivative in turn maximizes the diagonal of B
+        but not its determinant, and an ill-conditioned B makes Omega = 1/det(B)
+        and the pullbacks blow up. The weights |Omega|^2/det(g_pb) do not depend
+        on the choice, but Omega and the pullbacks on their own do, and the loss
+        pairs a model's det(g) with a dataset's |Omega|^2 point by point. So
+        point generators and models must use exactly the same rule: subsets are
+        scanned in lexicographic order and the first maximum wins, identically
+        in every backend and in the IPS sampler.
 
         Args:
-            points (jnp.ndarray, [bSize, 2*ncoords], float32): Points.
+            points (jnp.ndarray, [bSize, 2*ncoords]): Points.
 
         Returns:
-            jnp.ndarray, [bSize, nhyper], int64.
+            jnp.ndarray(int32), [bSize, nhyper]: Coordinates to eliminate.
         """
         cpoints = (points[:, :self.ncoords]
                    + 1j * points[:, self.ncoords:]).astype(complex_dtype())
-        available_mask = self._get_inv_one_mask(points).astype(complex_dtype())
-
-        indices = None
-        for i in range(self.nhyper):
-            dQdz = self._compute_dQdz(cpoints, i)         # (n_p, ncoords)
-            max_idx = jnp.argmax(jnp.abs(dQdz * available_mask), axis=-1)  # (n_p,)
-            if i == 0:
-                indices = max_idx[:, None]                 # (n_p, 1)
-            else:
-                indices = jnp.concatenate(
-                    [indices, max_idx[:, None]], axis=-1)  # (n_p, i+1)
-            available_mask = (available_mask
-                              - jax.nn.one_hot(max_idx, self.ncoords,
-                                               dtype=complex_dtype()))
-        return indices.astype(jnp.int32)
+        available = self._get_inv_one_mask(points)                # (n_p, ncoords) bool
+        if self.nhyper == 1:
+            dQdz = self._compute_dQdz(cpoints, 0)
+            max_idx = jnp.argmax(
+                jnp.abs(dQdz * available.astype(complex_dtype())), axis=-1)
+            return max_idx[:, None].astype(jnp.int32)
+        dQdz = jnp.stack([self._compute_dQdz(cpoints, i) for i in range(self.nhyper)],
+                         axis=1)                                  # (n_p, k, ncoords)
+        subsets = np.array(list(it.combinations(range(self.ncoords), self.nhyper)))
+        n_p = points.shape[0]
+        best_det = jnp.full((n_p,), -1.0, dtype=real_dtype())
+        best_idx = jnp.zeros((n_p,), dtype=jnp.int32)
+        for c0 in range(0, len(subsets), 64):
+            sub = subsets[c0:c0 + 64]                             # (s, k)
+            B = jnp.transpose(dQdz[:, :, sub], (0, 2, 1, 3))     # (n_p, s, k, k)
+            absdet = jnp.abs(jnp.linalg.det(B)).astype(real_dtype())
+            absdet = jnp.where(jnp.all(available[:, sub], axis=-1), absdet, -1.0)
+            loc = jnp.argmax(absdet, axis=1)
+            val = jnp.take_along_axis(absdet, loc[:, None], axis=1)[:, 0]
+            # strictly greater: the earlier (lexicographically smaller) subset wins ties
+            update = val > best_det
+            best_det = jnp.where(update, val, best_det)
+            best_idx = jnp.where(update, (c0 + loc).astype(jnp.int32), best_idx)
+        return jnp.asarray(subsets, dtype=jnp.int32)[best_idx]
 
     @eqx.filter_jit
     def pullbacks(self, points, j_elim=None):

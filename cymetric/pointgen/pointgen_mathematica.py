@@ -28,9 +28,10 @@ class PointGeneratorMathematica(CICYPointGenerator):
     r"""PointGeneratorMathematica class.
 
     Uses
-    PointGeneratorMathematica.m as the backend.  The Mathematica file
-    returns ALL valid numParamsInPn assignments; this class stores them in
-    ``self.all_assignments`` and computes mixture weights accordingly.
+    PointGeneratorMathematica.m as the backend.  The Mathematica file samples
+    with a single parameter assignment (numParamsInPn) and returns it, and the
+    weights use that assignment.  Points loaded from ``point_file_path`` must
+    come with the assignment they were drawn with, passed as ``selected_t``.
 
     This uses mathematica as a backand to carry out the computations
 
@@ -95,8 +96,17 @@ class PointGeneratorMathematica(CICYPointGenerator):
         super(PointGeneratorMathematica, self).__init__(*args, **kwargs)
         self.kernel_path = kernel_path
 
-        # NOTE: This is computed in the constructor, but we need to use the distribution that the Mathematica point gen used
-        self.selected_t = selected_t if selected_t is not None else np.zeros((len(self.ambient)), dtype=int)
+        # GeneratePointsM samples with a single parameter assignment and returns
+        # it. Points loaded from point_file_path were drawn with the assignment
+        # passed in as selected_t, so the weights must use that one alone, not
+        # the mixture over every valid assignment that CICYPointGenerator set up
+        # in self.all_ts. Without selected_t, generate_points sets both once
+        # Mathematica has reported its choice.
+        if selected_t is not None:
+            self.selected_t = np.asarray(selected_t, dtype=int)
+            self.all_ts = self.selected_t[None, :]
+        else:
+            self.selected_t = np.zeros((len(self.ambient)), dtype=int)
         # all_assignments is populated by generate_points() once Mathematica returns
         # the full list of valid numParamsInPn vectors.  Until then it is None and
         # point_weight falls back to self.all_ts (Python-computed valid assignments).
@@ -208,9 +218,11 @@ class PointGeneratorMathematica(CICYPointGenerator):
         tetra-quadric) while distributing points across all M valid assignments
         so every ambient factor is covered.
 
-        Falls back to the arithmetic-mean-of-densities formula when per-point
-        assignment indices are not available (e.g. when points were loaded from
-        a file rather than freshly generated).
+        Without per-point indices, ``det g`` is averaged over the assignments
+        the points were drawn from: ``self.all_assignments`` if set, otherwise
+        ``self.all_ts``. For points from GeneratePointsM, and for points loaded
+        with ``selected_t``, that is a single assignment, so this is exactly its
+        own weight.
 
         Args:
             points (ndarray([n_p, ncoords], np.complex128)): Points.
@@ -287,6 +299,14 @@ class PointGeneratorMathematica(CICYPointGenerator):
                 print("Removed {} ambiguous points.".format(len(inv_one_mask) - len(points)))
                 print(len(points))
         else:
+            assignments = (self.all_assignments if self.all_assignments is not None
+                           else getattr(self, 'all_ts', None))
+            if assignments is None or len(assignments) != 1:
+                raise ValueError(
+                    "The points in point_file_path were sampled with a single "
+                    "parameter assignment, which must be passed as selected_t "
+                    "(GeneratePointsM returns it as its second value); otherwise "
+                    "the weights would assume the wrong sampling distribution.")
             points = np.array(pickle.load(open(self.point_file_path, 'rb')))
         
         n_p = len(points)
@@ -388,8 +408,9 @@ class ToricPointGeneratorMathematica(PointGeneratorMathematica):
         self.wl_session = None
         self.point_file_path = point_file_path
         # Toric multi-assignment fix is deferred; keep single-assignment weights.
-        # all_assignments is populated by generate_points to [self.selected_t].
-        self.all_assignments = None
+        # The assignment the points were drawn with: from generate_points, or
+        # selected_t when the points come from point_file_path.
+        self.all_assignments = None if selected_t is None else [np.asarray(selected_t, dtype=int)]
         # Toric uses a single assignment, so all points have index 0.
         self.point_assignment_indices = None
         

@@ -589,30 +589,53 @@ class FSModel(nn.Module):
         return pullbacks
 
     def _find_max_dQ_coords(self, points):
-        r"""Finds in each hypersurface the coordinates for which |dQ/dzj|
-        is largest.
+        r"""Finds the coordinates to eliminate in the pullbacks.
+
+        For one hypersurface, |det B| = |dQ/dz_j|, so the coordinate with the
+        largest |dQ/dz_j| is optimal. For several, the nhyper coordinates are
+        chosen jointly to maximize |det B| with B_ij = dQ_i/dz_(e_j): picking
+        each equation's largest derivative in turn maximizes the diagonal of B
+        but not its determinant, and an ill-conditioned B makes Omega = 1/det(B)
+        and the pullbacks blow up. The weights |Omega|^2/det(g_pb) do not depend
+        on the choice, but Omega and the pullbacks on their own do, and the loss
+        pairs a model's det(g) with a dataset's |Omega|^2 point by point. So
+        point generators and models must use exactly the same rule: subsets are
+        scanned in lexicographic order and the first maximum wins, identically
+        in every backend and in the IPS sampler.
 
         Args:
-            points (torch.tensor([bSize, 2*ncoords], float32)): Points.
+            points (torch.tensor, [bSize, 2*ncoords]): Points.
 
         Returns:
-            torch.tensor([bSize, nhyper], int64): max(dQ/dz) index per hyper.
+            torch.tensor(int64), [bSize, nhyper]: Coordinates to eliminate.
         """
         cpoints = torch.complex(points[:, :self.ncoords], points[:, self.ncoords:])
-        available_mask = self._get_inv_one_mask(points).to(torch.complex64)
-        
-        indices = []
-        for i in range(self.nhyper):
-            dQdz = self._compute_dQdz(cpoints, i)
-            if i == 0:
-                max_indices = torch.argmax(torch.abs(dQdz * available_mask), dim=-1)
-                indices = max_indices.unsqueeze(1)
-            else:
-                max_dq = torch.argmax(torch.abs(dQdz * available_mask), dim=-1)
-                indices = torch.cat([indices, max_dq.unsqueeze(1)], dim=-1)
-            available_mask -= torch.nn.functional.one_hot(indices[:, i], self.ncoords).to(torch.complex64)
-        
-        return indices
+        available = self._get_inv_one_mask(points)
+        if self.nhyper == 1:
+            dQdz = self._compute_dQdz(cpoints, 0)
+            return torch.argmax(
+                torch.abs(dQdz * available.to(torch.complex64)), dim=-1).unsqueeze(1)
+        dQdz = torch.stack([self._compute_dQdz(cpoints, i) for i in range(self.nhyper)],
+                           dim=1)                                 # (bSize, k, ncoords)
+        subsets = torch.tensor(list(it.combinations(range(self.ncoords), self.nhyper)),
+                               dtype=torch.long, device=points.device)
+        n_p = points.shape[0]
+        best_det = torch.full((n_p,), -1.0, device=points.device)
+        best_idx = torch.zeros(n_p, dtype=torch.long, device=points.device)
+        rows = torch.arange(n_p, device=points.device)
+        for c0 in range(0, len(subsets), 64):
+            sub = subsets[c0:c0 + 64]                             # (s, k)
+            B = dQdz[:, :, sub].permute(0, 2, 1, 3)              # (bSize, s, k, k)
+            absdet = torch.abs(torch.linalg.det(B)).to(best_det.dtype)
+            ok = available[:, sub].all(dim=-1)
+            absdet = torch.where(ok, absdet, torch.full_like(absdet, -1.0))
+            loc = torch.argmax(absdet, dim=1)
+            val = absdet[rows, loc]
+            # strictly greater: the earlier (lexicographically smaller) subset wins ties
+            update = val > best_det
+            best_det = torch.where(update, val, best_det)
+            best_idx = torch.where(update, c0 + loc, best_idx)
+        return subsets[best_idx]
 
     def _compute_dQdz(self, points, k):
         r"""Computes dQdz at each point.

@@ -272,36 +272,51 @@ class FSModel(tfk.Model):
 
     @tf.function
     def _find_max_dQ_coords(self, points):
-        r"""Finds in each hypersurface the coordinates for which |dQ/dzj|
-        is largest.
+        r"""Finds the coordinates to eliminate in the pullbacks.
 
-        NOTE:
-            If a coordinate is the largest for more than one hypersurface, it
-            will only be selected for the first and subsequently the second 
-            largest will be taken, etc..
+        For one hypersurface, |det B| = |dQ/dz_j|, so the coordinate with the
+        largest |dQ/dz_j| is optimal. For several, the nhyper coordinates are
+        chosen jointly to maximize |det B| with B_ij = dQ_i/dz_(e_j): picking
+        each equation's largest derivative in turn maximizes the diagonal of B
+        but not its determinant, and an ill-conditioned B makes Omega = 1/det(B)
+        and the pullbacks blow up. The weights |Omega|^2/det(g_pb) do not depend
+        on the choice, but Omega and the pullbacks on their own do, and the loss
+        pairs a model's det(g) with a dataset's |Omega|^2 point by point. So
+        point generators and models must use exactly the same rule: subsets are
+        scanned in lexicographic order and the first maximum wins, identically
+        in every backend and in the IPS sampler.
 
         Args:
-            points (tf.tensor([bSize, 2*ncoords], tf.float32)): Points.
+            points (tf.tensor, [bSize, 2*ncoords]): Points.
 
         Returns:
-            tf.tensor([bSize, nhyper], tf.int64): max(dQ/dz) index per hyper.
+            tf.tensor(int64), [bSize, nhyper]: Coordinates to eliminate.
         """
-        # creates coordinate mask with patch coordinates
         cpoints = tf.complex(points[:, :self.ncoords], points[:, self.ncoords:])
-        available_mask = tf.cast(self._get_inv_one_mask(points), dtype=tf.complex64)
-
-        indices = []
-        for i in range(self.nhyper):
-            dQdz = self._compute_dQdz(cpoints, i)
-            if i == 0:
-                indices = tf.argmax(tf.math.abs(dQdz*available_mask), axis=-1)
-                indices = tf.reshape(indices, (-1, 1))
-            else:
-                max_dq = tf.argmax(tf.math.abs(dQdz*available_mask), axis=-1)
-                indices = tf.concat([indices, tf.reshape(max_dq, (-1, 1))], axis=-1)
-            available_mask -= tf.one_hot(
-                indices[:, i], self.ncoords, dtype=tf.complex64)
-        return indices
+        available = self._get_inv_one_mask(points)
+        if self.nhyper == 1:
+            dQdz = self._compute_dQdz(cpoints, 0)
+            indices = tf.argmax(
+                tf.math.abs(dQdz * tf.cast(available, dtype=tf.complex64)), axis=-1)
+            return tf.reshape(indices, (-1, 1))
+        dQdz = tf.stack([self._compute_dQdz(cpoints, i) for i in range(self.nhyper)],
+                        axis=1)                                   # (bSize, k, ncoords)
+        subsets = np.array(list(it.combinations(range(self.ncoords), self.nhyper)))
+        best_det = tf.fill(tf.shape(points)[:1], tf.constant(-1.0, dtype=tf.float32))
+        best_idx = tf.zeros(tf.shape(points)[:1], dtype=tf.int64)
+        for c0 in range(0, len(subsets), 64):
+            sub = subsets[c0:c0 + 64]                             # (s, k)
+            B = tf.transpose(tf.gather(dQdz, sub, axis=2), (0, 2, 1, 3))
+            absdet = tf.cast(tf.math.abs(tf.linalg.det(B)), tf.float32)  # (bSize, s)
+            ok = tf.reduce_all(tf.gather(available, sub, axis=1), axis=-1)
+            absdet = tf.where(ok, absdet, tf.constant(-1.0, dtype=tf.float32))
+            loc = tf.argmax(absdet, axis=1)
+            val = tf.gather(absdet, loc, axis=1, batch_dims=1)
+            # strictly greater: the earlier (lexicographically smaller) subset wins ties
+            update = val > best_det
+            best_det = tf.where(update, val, best_det)
+            best_idx = tf.where(update, c0 + loc, best_idx)
+        return tf.gather(tf.constant(subsets, dtype=tf.int64), best_idx)
 
     @tf.function
     def pullbacks(self, points, j_elim=None):
