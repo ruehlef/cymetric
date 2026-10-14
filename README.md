@@ -103,8 +103,8 @@ jupyter notebook
 ```
 This will open jupyter in your web browser. Navigate to the folder where you downloaded the files and click on them to open.
 
-0. In [1.PointGenerator.ipynb](notebooks/0.GettingStarted.ipynb) you get a pipeline to generate points and learn the metric for the Quintic, in tensorflow, pytorch, and jax.
-1. In [1.PointGenerator.ipynb](notebooks/1.PointGenerator.ipynb) we explore the different PointGenerators for codimension-1 CICY, general CICYs and CY in toric varieties on the Fermat Quintic. 
+0. In [0.GettingStarted.ipynb](notebooks/0.GettingStarted.ipynb) you get a pipeline to generate points and learn the metric for the Quintic, in tensorflow, pytorch, and jax.
+1. In [1.PointGenerator.ipynb](notebooks/1.PointGenerator.ipynb) we explore the different PointGenerators for codimension-1 CICY, general CICYs and CY in toric varieties on the Fermat Quintic. This includes the Mathematica-based IPS point generator, which implements the improved point sampling of [Keller and Lukic](https://arxiv.org/abs/0907.1387) with several Fubini-Study metrics to make the weights more uniform.
 2. In [2.TensorFlow_models.ipynb](notebooks/2.TensorFlow_models.ipynb) we explore some of the TF custom models with the data generated in the first notebook. 
 3. In [3.Sage_integration_.ipynb](notebooks/3.Sage_integration_example.ipynb) we illustrate how to run the package from within Sage to compute the CY metric on a Kreuzer-Skarke model.
 4. In [Mathematica_integration_example.nb](/notebooks/4.Mathematica_integration_example.nb), we illustrate how to call the PointGenerators and the models for training and evaluation. Furthermore, there are arbitrary precision PointGenerators based on the wolfram language.
